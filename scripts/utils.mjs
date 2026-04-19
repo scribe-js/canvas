@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const OWNER = 'Brooooooklyn'
+export const OWNER = 'scribe-js'
 export const REPO = 'canvas'
 
 const [FULL_HASH] =

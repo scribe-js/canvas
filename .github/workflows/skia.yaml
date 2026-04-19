@@ -12,7 +12,6 @@ env:
 
 permissions:
   contents: write
-  packages: read
 
 jobs:
   build:
@@ -66,14 +65,6 @@ jobs:
         if: runner.os == 'Windows'
         run: rm /usr/bin/link
         shell: bash
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        if: matrix.os == 'ubuntu-latest'
-        with:
-          registry: ghcr.io
-          username: ${{ secrets.GH_CONTAINER_UNAME }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Sync deps on host
         run: python ./tools/git-sync-deps
@@ -272,13 +263,6 @@ jobs:
       - name: Sync deps on host
         run: python ./tools/git-sync-deps
         working-directory: skia
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ secrets.GH_CONTAINER_UNAME }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compile skia
         run: |
