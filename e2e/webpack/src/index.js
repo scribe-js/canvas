@@ -1,8 +1,8 @@
-// E2E test for PDF rendering with pdfjs-dist and @napi-rs/canvas
+// E2E test for PDF rendering with pdfjs-dist and @scribe.js/canvas
 // This test verifies that pdfjs-dist can render PDFs to canvas in a webpack bundle
 
 import fs from 'fs';
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas } from '@scribe.js/canvas';
 
 const init = async () => {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
