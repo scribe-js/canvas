@@ -529,6 +529,13 @@ impl Context {
   }
 
   pub fn set_transform(&mut self, ts: Matrix) {
+    // scribe.js fork
+    // Re-express the current path in the new local coordinate system, so that
+    // its device positions are preserved across the CTM change. 
+    if let Some(inverse) = ts.invert() {
+      let delta = self.state.transform.multiply(&inverse);
+      self.path.transform_self(&delta);
+    }
     self.state.transform = ts.clone();
     self.with_canvas_state(|canvas| {
       canvas.set_transform(&ts);
@@ -537,6 +544,10 @@ impl Context {
   }
 
   pub fn reset_transform(&mut self) {
+    // scribe.js fork
+    // Same as set_transform(identity): re-express the path in the new identity local space.
+    let current = self.state.transform.clone();
+    self.path.transform_self(&current);
     self.state.transform = Matrix::identity();
     self.with_canvas_state(|canvas| {
       canvas.reset_transform();

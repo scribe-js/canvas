@@ -1058,12 +1058,20 @@ impl<'env> ScopedTask<'env> for BitmapDecoder {
     } else {
       false
     } {
-      // Other image formats detected by infer (PNG, JPEG, GIF, WebP, etc.)
-      DecodeStatus::Ok(BitmapInfo {
-        data: Bitmap::from_buffer(data_ref.as_ptr().cast_mut(), length),
-        is_svg: false,
-        decoded_image: None,
-      })
+      // scribe.js fork
+      // When Skia codec rejects the data (e.g. malformed JPEG missing
+      // SOS, truncated PNG), Bitmap::from_buffer returns a Bitmap with a null inner pointer.
+      // Surface that as InvalidImage rather than returning a bitmap whose pointer Rust will later try to use.
+      let bitmap = Bitmap::from_buffer(data_ref.as_ptr().cast_mut(), length);
+      if bitmap.0.bitmap.is_null() {
+        DecodeStatus::InvalidImage
+      } else {
+        DecodeStatus::Ok(BitmapInfo {
+          data: bitmap,
+          is_svg: false,
+          decoded_image: None,
+        })
+      }
     } else if is_svg_image(&data_ref, length) {
       let font = get_font().map_err(SkError::from)?;
       if (self.width - -1.0).abs() > f64::EPSILON && (self.height - -1.0).abs() > f64::EPSILON {

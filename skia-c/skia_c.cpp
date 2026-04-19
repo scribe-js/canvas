@@ -612,6 +612,8 @@ void skiac_canvas_get_line_metrics_or_draw_text(
   paragraph_style.setTextStyle(text_style);
   paragraph_style.setTextDirection(text_direction);
   paragraph_style.setStrutStyle(struct_style);
+  // scribe.js fork
+  paragraph_style.setApplyRoundingHack(false);
   ParagraphBuilderImpl builder(paragraph_style, font_collection,
                                SkUnicodes::ICU::Make());
   builder.addText(text, text_len);
@@ -1917,13 +1919,32 @@ void skiac_sk_data_destroy(skiac_data* c_data) {
 void skiac_bitmap_make_from_buffer(const uint8_t* ptr,
                                    size_t size,
                                    skiac_bitmap_info* bitmap_info) {
+  // scribe.js fork
+  // Defensive failure path: every exit must leave bitmap_info in a
+  // consistent state so the Rust caller can detect decode failure via
+  // bitmap == nullptr. 
+  bitmap_info->bitmap = nullptr;
+  bitmap_info->width = 0;
+  bitmap_info->height = 0;
+
   auto data = SkData::MakeWithoutCopy(reinterpret_cast<const void*>(ptr), size);
   auto codec = SkCodec::MakeFromData(data);
+  if (!codec) {
+    return;
+  }
   auto info = codec->getInfo();
   auto row_bytes = info.minRowBytes();
   auto bitmap = new SkBitmap();
-  bitmap->allocPixels(info);
-  codec->getPixels(info, bitmap->getPixels(), row_bytes);
+  if (!bitmap->tryAllocPixels(info)) {
+    delete bitmap;
+    return;
+  }
+  auto decode_result = codec->getPixels(info, bitmap->getPixels(), row_bytes);
+  if (decode_result != SkCodec::kSuccess &&
+      decode_result != SkCodec::kIncompleteInput) {
+    delete bitmap;
+    return;
+  }
   auto dimension = codec->dimensions();
   auto origin = codec->getOrigin();
   auto width = dimension.width();

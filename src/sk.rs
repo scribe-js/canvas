@@ -2610,9 +2610,34 @@ impl Canvas {
     lang: &str,
     text_rendering: TextRendering,
   ) -> Result<(), NulError> {
-    let c_text = std::ffi::CString::new(text)?;
+    // scribe.js fork
+    // `text` does not go through CString — the FFI call takes an explicit
+    // (*const c_char, usize) pair and the C++ side (skiac_canvas_*_draw_text ->
+    // builder.addText) is fully length-aware, so wrapping in a CString just
+    // rejects any string containing an interior NUL. scribe.js's renderer can
+    // produce such strings when a CID's ToUnicode mapping is missing and the
+    // fallback is U+0000, which used to abort the whole node process.
+    //
+    // `font_family` and `lang` still need NUL-terminated C strings because the
+    // C++ side parses them with SkStrSplit / strcmp; strip any interior NULs
+    // defensively before CString::new so the binding never panics on malformed
+    // input.
+    let font_family_stripped;
+    let font_family = if font_family.contains('\0') {
+      font_family_stripped = font_family.replace('\0', "");
+      font_family_stripped.as_str()
+    } else {
+      font_family
+    };
     let c_font_family = std::ffi::CString::new(font_family)?;
     // Convert lang to C string, or null if empty/"inherit"
+    let lang_stripped;
+    let lang = if lang.contains('\0') {
+      lang_stripped = lang.replace('\0', "");
+      lang_stripped.as_str()
+    } else {
+      lang
+    };
     let c_lang = if lang.is_empty() || lang == "inherit" {
       None
     } else {
@@ -2621,7 +2646,7 @@ impl Canvas {
 
     unsafe {
       ffi::skiac_canvas_get_line_metrics_or_draw_text(
-        c_text.as_ptr(),
+        text.as_ptr() as *const c_char,
         text.len(),
         max_width,
         x,
@@ -2675,9 +2700,24 @@ impl Canvas {
     lang: &str,
     text_rendering: TextRendering,
   ) -> Result<ffi::skiac_line_metrics, NulError> {
-    let c_text = std::ffi::CString::new(text)?;
+    // scribe.js fork
+    // See draw_text above for rationale: `text` skips CString to tolerate
+    // interior NULs, while font_family/lang still strip NULs defensively.
+    let font_family_stripped;
+    let font_family = if font_family.contains('\0') {
+      font_family_stripped = font_family.replace('\0', "");
+      font_family_stripped.as_str()
+    } else {
+      font_family
+    };
     let c_font_family = std::ffi::CString::new(font_family)?;
-    // Convert lang to C string, or null if empty/"inherit"
+    let lang_stripped;
+    let lang = if lang.contains('\0') {
+      lang_stripped = lang.replace('\0', "");
+      lang_stripped.as_str()
+    } else {
+      lang
+    };
     let c_lang = if lang.is_empty() || lang == "inherit" {
       None
     } else {
@@ -2688,7 +2728,7 @@ impl Canvas {
 
     unsafe {
       ffi::skiac_canvas_get_line_metrics_or_draw_text(
-        c_text.as_ptr(),
+        text.as_ptr() as *const c_char,
         text.len(),
         0.0,
         0.0,
