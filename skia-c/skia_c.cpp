@@ -1922,7 +1922,7 @@ void skiac_bitmap_make_from_buffer(const uint8_t* ptr,
   // scribe.js fork
   // Defensive failure path: every exit must leave bitmap_info in a
   // consistent state so the Rust caller can detect decode failure via
-  // bitmap == nullptr. 
+  // bitmap == nullptr.
   bitmap_info->bitmap = nullptr;
   bitmap_info->width = 0;
   bitmap_info->height = 0;
