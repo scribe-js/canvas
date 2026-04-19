@@ -3,7 +3,7 @@ name: Build skia
 on:
   push:
     branches:
-      - release
+      - scribe-release
     tags-ignore:
       - '**'
 
