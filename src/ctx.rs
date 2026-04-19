@@ -531,7 +531,7 @@ impl Context {
   pub fn set_transform(&mut self, ts: Matrix) {
     // scribe.js fork
     // Re-express the current path in the new local coordinate system, so that
-    // its device positions are preserved across the CTM change. 
+    // its device positions are preserved across the CTM change.
     if let Some(inverse) = ts.invert() {
       let delta = self.state.transform.multiply(&inverse);
       self.path.transform_self(&delta);
