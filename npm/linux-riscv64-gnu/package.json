@@ -1,6 +1,6 @@
 {
-  "name": "@napi-rs/canvas-linux-riscv64-gnu",
-  "version": "0.1.97",
+  "name": "@scribe.js/canvas-linux-riscv64-gnu",
+  "version": "0.1.97-scribe.1",
   "os": [
     "linux"
   ],
@@ -35,13 +35,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Brooooooklyn/canvas.git"
+    "url": "git+https://github.com/scribe-js/canvas.git"
   },
   "libc": [
     "glibc"
   ],
   "funding": {
     "type": "github",
-    "url": "https://github.com/sponsors/Brooooooklyn"
+    "url": "https://github.com/scribe-js/canvas"
   }
 }

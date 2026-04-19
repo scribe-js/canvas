@@ -8,14 +8,14 @@ env:
 on:
   push:
     branches:
-      - main
+      - scribe-release
     tags-ignore:
       - '**'
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.ref_name != 'main' }}
+  cancel-in-progress: ${{ github.ref_name != 'scribe-release' }}
 
 jobs:
   lint:
@@ -725,10 +725,10 @@ jobs:
           npm install -g npm
           if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
           then
-            npm publish --access public
+            npm publish --access public --provenance
           elif git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+";
           then
-            npm publish --tag next --access public
+            npm publish --tag next --access public --provenance
           else
             echo "Not a release, skipping publish"
           fi

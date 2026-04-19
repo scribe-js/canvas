@@ -1,11 +1,11 @@
 {
-  "name": "@napi-rs/canvas",
-  "version": "0.1.97",
+  "name": "@scribe.js/canvas",
+  "version": "0.1.97-scribe.1",
   "description": "Canvas for Node.js with skia backend",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Brooooooklyn/canvas.git"
+    "url": "git+https://github.com/scribe-js/canvas.git"
   },
   "workspaces": [
     "e2e/*"
@@ -71,7 +71,7 @@
     "postpublish": "pinst --enable",
     "test:ci": "ava -c 1",
     "test": "ava",
-    "e2e": "yarn workspace @napi-rs/canvas-e2e-webpack test",
+    "e2e": "yarn workspace @scribe.js/canvas-e2e-webpack test",
     "version": "napi version && conventional-changelog -p angular -i CHANGELOG.md -s && git add ."
   },
   "devDependencies": {
@@ -149,7 +149,7 @@
   },
   "funding": {
     "type": "github",
-    "url": "https://github.com/sponsors/Brooooooklyn"
+    "url": "https://github.com/scribe-js/canvas"
   },
   "packageManager": "yarn@4.13.0"
 }
