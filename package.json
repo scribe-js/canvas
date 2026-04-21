@@ -1,6 +1,6 @@
 {
   "name": "@scribe.js/canvas",
-  "version": "0.1.97-scribe.1",
+  "version": "0.1.97-scribe.2",
   "description": "Canvas for Node.js with skia backend",
   "main": "index.js",
   "repository": {
