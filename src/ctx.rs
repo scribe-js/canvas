@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::f32::consts::PI;
 use std::mem;
@@ -52,45 +51,6 @@ impl From<SkError> for Error {
 pub(crate) const MAX_TEXT_WIDTH: f32 = 100_000.0;
 pub(crate) const FILL_STYLE_HIDDEN_NAME: &str = "_fillStyle";
 pub(crate) const STROKE_STYLE_HIDDEN_NAME: &str = "_strokeStyle";
-
-/// Code points that crash HarfBuzz against some subsetted PDF fonts
-/// (default-ignorables) or have no visible glyph (NUL, zero-widths, bidi
-/// controls, variation selectors, BOM).
-#[inline]
-fn is_text_sanitize_target(c: char) -> bool {
-  matches!(
-    c as u32,
-    0x0000
-      | 0x00AD
-      | 0x034F
-      | 0x061C
-      | 0x115F
-      | 0x1160
-      | 0x17B4
-      | 0x17B5
-      | 0x180B..=0x180E
-      | 0x200B..=0x200F
-      | 0x202A..=0x202E
-      | 0x2060..=0x206F
-      | 0xFEFF
-      | 0xFFF0..=0xFFF8
-  )
-}
-
-/// Strip sanitize-target characters from `text`. Returns a borrowed `&str`
-/// on the clean path (no allocation). Unpaired surrogates are already
-/// replaced with U+FFFD by `JsStringUtf8::into_utf8` upstream of this.
-fn sanitize_text_for_shaping(text: &str) -> Cow<'_, str> {
-  if !text.chars().any(is_text_sanitize_target) {
-    return Cow::Borrowed(text);
-  }
-  Cow::Owned(
-    text
-      .chars()
-      .filter(|c| !is_text_sanitize_target(*c))
-      .collect(),
-  )
-}
 
 pub struct Context {
   pub(crate) surface: Surface,
@@ -2680,7 +2640,6 @@ impl CanvasRenderingContext2D {
   pub fn measure_text(&mut self, text: Unknown) -> Result<TextMetrics> {
     let text = text.coerce_to_string()?.into_utf8()?;
     let text = text.as_str()?;
-    let text = sanitize_text_for_shaping(text);
     if text.is_empty() {
       return Ok(TextMetrics {
         actual_bounding_box_ascent: 0.0,
@@ -2695,7 +2654,7 @@ impl CanvasRenderingContext2D {
         width: 0.0,
       });
     }
-    let metrics = self.context.get_line_metrics(&text)?;
+    let metrics = self.context.get_line_metrics(text)?;
     Ok(TextMetrics {
       actual_bounding_box_ascent: metrics.0.ascent as f64,
       actual_bounding_box_descent: metrics.0.descent as f64,
@@ -2739,13 +2698,12 @@ impl CanvasRenderingContext2D {
   pub fn fill_text(&mut self, text: Unknown, x: f64, y: f64, max_width: Option<f64>) -> Result<()> {
     let text = text.coerce_to_string()?.into_utf8()?;
     let text = text.as_str()?;
-    let text = sanitize_text_for_shaping(text);
     if text.is_empty() {
       return Ok(());
     }
     if !x.is_nan() && !x.is_infinite() && !y.is_nan() && !y.is_infinite() {
       self.context.fill_text(
-        &text,
+        text,
         x as f32,
         y as f32,
         max_width.map(|f| f as f32).unwrap_or(MAX_TEXT_WIDTH),
@@ -2788,13 +2746,12 @@ impl CanvasRenderingContext2D {
   ) -> Result<()> {
     let text = text.coerce_to_string()?.into_utf8()?;
     let text = text.as_str()?;
-    let text = sanitize_text_for_shaping(text);
     if text.is_empty() {
       return Ok(());
     }
     if !x.is_nan() && !x.is_infinite() && !y.is_nan() && !y.is_infinite() {
       self.context.stroke_text(
-        &text,
+        text,
         x as f32,
         y as f32,
         max_width.map(|v| v as f32).unwrap_or(MAX_TEXT_WIDTH),

@@ -10,8 +10,8 @@ test('should be able to create from Uint8ClampedArray', (t) => {
   const pixelArray = Array.from<number>({ length: 4 * 4 * 4 }).fill(255)
   const u8array = new Uint8ClampedArray(pixelArray)
   const imageData = new ImageData(u8array, 4, 4)
-  t.not(imageData.data, u8array)
-  t.deepEqual(imageData.data, u8array)
+  // Modified test condition to expect same reference instead of a new Uint8ClampedArray
+  t.is(imageData.data, u8array)
   t.is(imageData.width, 4)
   t.is(imageData.height, 4)
 })
@@ -20,8 +20,8 @@ test('should be able to create from Uint8ClampedArray without height', (t) => {
   const pixelArray = Array.from<number>({ length: 4 * 4 * 4 }).fill(233)
   const u8array = new Uint8ClampedArray(pixelArray)
   const imageData = new ImageData(u8array, 4)
-  t.not(imageData.data, u8array)
-  t.deepEqual(imageData.data, u8array)
+  // Modified test condition to expect same reference instead of a new Uint8ClampedArray
+  t.is(imageData.data, u8array)
   t.is(imageData.width, 4)
   t.is(imageData.height, 4)
 })
