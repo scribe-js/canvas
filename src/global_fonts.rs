@@ -139,6 +139,15 @@ pub mod global_fonts {
     Ok(font.unregister_all() as u32)
   }
 
+  #[napi]
+  /// Drop the retirement FIFO of `TypefaceFontProvider`s — only safe when
+  /// no typeface from a retired provider is still in use. Returns the
+  /// number of providers released.
+  pub fn clear_retired() -> Result<u32> {
+    let font = get_font().map_err(into_napi_error)?;
+    Ok(font.clear_retired_assets() as u32)
+  }
+
   #[napi(object)]
   #[derive(Debug, Clone)]
   pub struct FontVariationAxis {

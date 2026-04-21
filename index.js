@@ -5,6 +5,7 @@ const {
   clearAllCache,
   CanvasRenderingContext2D,
   CanvasElement,
+  CanvasPattern,
   SVGCanvas,
   Path: Path2D,
   ImageData,
@@ -30,6 +31,29 @@ const loadImage = require('./load-image')
 if (GifEncoder && typeof Symbol.dispose !== 'undefined') {
   GifEncoder.prototype[Symbol.dispose] = function () {
     this.dispose()
+  }
+}
+
+if (typeof Symbol.dispose !== 'undefined') {
+  if (CanvasElement && !CanvasElement.prototype[Symbol.dispose]) {
+    CanvasElement.prototype[Symbol.dispose] = function () {
+      this.dispose()
+    }
+  }
+  if (SVGCanvas && !SVGCanvas.prototype[Symbol.dispose]) {
+    SVGCanvas.prototype[Symbol.dispose] = function () {
+      this.dispose()
+    }
+  }
+  if (Image && !Image.prototype[Symbol.dispose]) {
+    Image.prototype[Symbol.dispose] = function () {
+      this.dispose()
+    }
+  }
+  if (CanvasPattern && !CanvasPattern.prototype[Symbol.dispose]) {
+    CanvasPattern.prototype[Symbol.dispose] = function () {
+      this.dispose()
+    }
   }
 }
 

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::f32::consts::PI;
 use std::mem;
@@ -52,6 +53,37 @@ pub(crate) const MAX_TEXT_WIDTH: f32 = 100_000.0;
 pub(crate) const FILL_STYLE_HIDDEN_NAME: &str = "_fillStyle";
 pub(crate) const STROKE_STYLE_HIDDEN_NAME: &str = "_strokeStyle";
 
+/// Code points that crash HarfBuzz against some subsetted PDF fonts
+/// (default-ignorables) or have no visible glyph (NUL, zero-widths, bidi
+/// controls, variation selectors, BOM).
+#[inline]
+fn is_text_sanitize_target(c: char) -> bool {
+  let code = c as u32;
+  match code {
+    0x0000 => true,
+    0x00AD | 0x034F | 0x061C => true,
+    0x115F | 0x1160 => true,
+    0x17B4 | 0x17B5 => true,
+    0x180B..=0x180E => true,
+    0x200B..=0x200F => true,
+    0x202A..=0x202E => true,
+    0x2060..=0x206F => true,
+    0xFEFF => true,
+    0xFFF0..=0xFFF8 => true,
+    _ => false,
+  }
+}
+
+/// Strip sanitize-target characters from `text`. Returns a borrowed `&str`
+/// on the clean path (no allocation). Unpaired surrogates are already
+/// replaced with U+FFFD by `JsStringUtf8::into_utf8` upstream of this.
+fn sanitize_text_for_shaping(text: &str) -> Cow<'_, str> {
+  if !text.chars().any(is_text_sanitize_target) {
+    return Cow::Borrowed(text);
+  }
+  Cow::Owned(text.chars().filter(|c| !is_text_sanitize_target(*c)).collect())
+}
+
 pub struct Context {
   pub(crate) surface: Surface,
   pub(crate) page_recorder: Option<RefCell<PageRecorder>>, // Deferred rendering recorder (RefCell for interior mutability)
@@ -63,6 +95,13 @@ pub struct Context {
   pub height: u32,
   pub color_space: ColorSpace,
   pub stream: Option<SkWMemoryStream>,
+  /// Bytes currently reported to V8 via `adjust_external_memory` for this
+  /// Context. Kept in sync across construction, resize, and dispose so
+  /// finalization returns the exact inverse.
+  pub(crate) tracked_external: i64,
+  /// Set by `dispose()`; public methods check this and reject with an
+  /// error (the surface / recorder are no longer valid to draw on).
+  pub(crate) disposed: bool,
 }
 
 impl Context {
@@ -91,6 +130,8 @@ impl Context {
       height,
       color_space,
       stream: Some(stream),
+      tracked_external: 0,
+      disposed: false,
     })
   }
 
@@ -108,6 +149,8 @@ impl Context {
       height,
       color_space,
       stream: None,
+      tracked_external: 0,
+      disposed: false,
     })
   }
 
@@ -124,7 +167,44 @@ impl Context {
       height,
       color_space: ColorSpace::default(),
       stream: None,
+      tracked_external: 0,
+      disposed: false,
     }
+  }
+
+  /// Upper-bound estimate of the native Skia bytes this Context will hold.
+  /// Deferred-rendering contexts budget for two `w*h*4` surfaces (primary
+  /// surface + lazily-allocated `RecordingSurface` inside `PageRecorder`);
+  /// direct-rendering contexts (SVG, PDF) only own the primary surface.
+  pub(crate) fn expected_external_bytes(&self) -> i64 {
+    let pixels = (self.width as i64) * (self.height as i64) * 4;
+    if self.page_recorder.is_some() {
+      pixels * 2
+    } else {
+      pixels
+    }
+  }
+
+  /// Release every Skia resource this Context owns. Returns the external-
+  /// memory byte count the caller should subtract from V8's accounting.
+  /// Idempotent.
+  pub(crate) fn dispose(&mut self) -> i64 {
+    if self.disposed {
+      return 0;
+    }
+    self.page_recorder = None;
+    // Replace `surface` with a null-pointer sentinel. `Surface::drop` is a
+    // no-op when `ptr.is_null()`, so this drops the real Skia surface
+    // without allocating a replacement. Public methods are guarded by the
+    // `disposed` flag, so no code path dereferences the sentinel.
+    let null_surface = Surface::from_borrowed_canvas(crate::sk::Canvas(std::ptr::null_mut()));
+    drop(std::mem::replace(&mut self.surface, null_surface));
+    let freed = self.tracked_external;
+    self.tracked_external = 0;
+    self.width = 1;
+    self.height = 1;
+    self.disposed = true;
+    freed
   }
 
   /// Flush deferred rendering to surface (if deferred mode is enabled)
@@ -976,14 +1056,7 @@ impl Context {
     h: f32,
     color_type: ColorSpace,
   ) -> Option<Vec<u8>> {
-    // Use RecordingSurface for deferred mode - enables incremental rendering
-    if let Some(ref recorder) = self.page_recorder {
-      return recorder
-        .borrow_mut()
-        .get_pixels(x as i32, y as i32, w as u32, h as u32, color_type);
-    }
-
-    // Direct mode - read from main surface
+    self.flush();
     self
       .surface
       .read_pixels(x as i32, y as i32, w as u32, h as u32, color_type)
@@ -1554,7 +1627,12 @@ pub struct CanvasRenderingContext2D {
 
 impl ObjectFinalize for CanvasRenderingContext2D {
   fn finalize(self, env: Env) -> Result<()> {
-    env.adjust_external_memory(-((self.context.width * self.context.height * 4) as i64))?;
+    // `tracked_external` is zero if dispose() already ran (the normal
+    // path); the rest subtracts the debt still owed at GC time.
+    let owed = self.context.tracked_external;
+    if owed != 0 {
+      env.adjust_external_memory(-owed)?;
+    }
     Ok(())
   }
 }
@@ -1563,17 +1641,24 @@ impl ObjectFinalize for CanvasRenderingContext2D {
 impl CanvasRenderingContext2D {
   #[napi(constructor)]
   pub fn new(
+    env: Env,
     width: u32,
     height: u32,
     color_space: String,
     flag: Option<SvgExportFlag>,
   ) -> Result<Self> {
     let color_space = ColorSpace::from_str(&color_space)?;
-    let context = if let Some(flag) = flag {
+    let mut context = if let Some(flag) = flag {
       Context::new_svg(width, height, flag.into(), color_space)?
     } else {
       Context::new(width, height, color_space)?
     };
+    // Stand-alone instances (not constructed via CanvasElement::create_context)
+    // must account for their own external memory so ObjectFinalize has a
+    // non-zero debt to subtract at GC.
+    let bytes = context.expected_external_bytes();
+    context.tracked_external = bytes;
+    env.adjust_external_memory(bytes)?;
     Ok(Self { context })
   }
 
@@ -2587,6 +2672,7 @@ impl CanvasRenderingContext2D {
   pub fn measure_text(&mut self, text: Unknown) -> Result<TextMetrics> {
     let text = text.coerce_to_string()?.into_utf8()?;
     let text = text.as_str()?;
+    let text = sanitize_text_for_shaping(text);
     if text.is_empty() {
       return Ok(TextMetrics {
         actual_bounding_box_ascent: 0.0,
@@ -2601,7 +2687,7 @@ impl CanvasRenderingContext2D {
         width: 0.0,
       });
     }
-    let metrics = self.context.get_line_metrics(text)?;
+    let metrics = self.context.get_line_metrics(&text)?;
     Ok(TextMetrics {
       actual_bounding_box_ascent: metrics.0.ascent as f64,
       actual_bounding_box_descent: metrics.0.descent as f64,
@@ -2645,12 +2731,13 @@ impl CanvasRenderingContext2D {
   pub fn fill_text(&mut self, text: Unknown, x: f64, y: f64, max_width: Option<f64>) -> Result<()> {
     let text = text.coerce_to_string()?.into_utf8()?;
     let text = text.as_str()?;
+    let text = sanitize_text_for_shaping(text);
     if text.is_empty() {
       return Ok(());
     }
     if !x.is_nan() && !x.is_infinite() && !y.is_nan() && !y.is_infinite() {
       self.context.fill_text(
-        text,
+        &text,
         x as f32,
         y as f32,
         max_width.map(|f| f as f32).unwrap_or(MAX_TEXT_WIDTH),
@@ -2693,12 +2780,13 @@ impl CanvasRenderingContext2D {
   ) -> Result<()> {
     let text = text.coerce_to_string()?.into_utf8()?;
     let text = text.as_str()?;
+    let text = sanitize_text_for_shaping(text);
     if text.is_empty() {
       return Ok(());
     }
     if !x.is_nan() && !x.is_infinite() && !y.is_nan() && !y.is_infinite() {
       self.context.stroke_text(
-        text,
+        &text,
         x as f32,
         y as f32,
         max_width.map(|v| v as f32).unwrap_or(MAX_TEXT_WIDTH),
@@ -2749,12 +2837,54 @@ impl CanvasRenderingContext2D {
             "Read pixels from canvas failed".to_string(),
           )
         })?;
-      let mut data_object = Uint8ClampedSlice::from_data(env, image_data)?;
+      // Allocate a V8-managed ArrayBuffer and memcpy the pixels in —
+      // `Uint8ClampedSlice::from_data` takes the external-buffer path that
+      // pins the Rust `Vec` until V8 finalizes, and
+      // `Uint8ClampedSlice::copy_from` is broken in napi-rs 3.8.4 (skips
+      // the memcpy, returns zeros).
+      let (data_object, data_ptr) = {
+        let src = image_data.as_slice();
+        let len = src.len();
+        let mut arraybuffer_value = std::ptr::null_mut();
+        let mut underlying_data = std::ptr::null_mut();
+        napi::check_status!(unsafe {
+          napi::sys::napi_create_arraybuffer(
+            env.raw(),
+            len,
+            &mut underlying_data,
+            &mut arraybuffer_value,
+          )
+        }, "Failed to create ArrayBuffer for getImageData")?;
+        if len > 0 {
+          unsafe {
+            std::ptr::copy_nonoverlapping(
+              src.as_ptr(),
+              underlying_data as *mut u8,
+              len,
+            );
+          }
+        }
+        let mut typed_array = std::ptr::null_mut();
+        napi::check_status!(unsafe {
+          napi::sys::napi_create_typedarray(
+            env.raw(),
+            napi::sys::TypedarrayType::uint8_clamped_array,
+            len,
+            arraybuffer_value,
+            0,
+            &mut typed_array,
+          )
+        }, "Failed to create Uint8ClampedArray for getImageData")?;
+        drop(image_data);
+        let slice: Uint8ClampedSlice =
+          unsafe { <Uint8ClampedSlice as FromNapiValue>::from_napi_value(env.raw(), typed_array)? };
+        (slice, underlying_data as *mut u8)
+      };
       let mut instance = ImageData {
         width: sw as usize,
         height: sh as usize,
         color_space,
-        data: unsafe { data_object.as_mut() }.as_mut_ptr(),
+        data: data_ptr,
       }
       .into_instance(env)?;
       instance.set_named_property("data", data_object)?;

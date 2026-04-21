@@ -201,4 +201,11 @@ impl CanvasPattern {
       image.transform = transform.into();
     }
   }
+
+  #[napi]
+  pub fn dispose(&mut self) {
+    self.surface.take();
+    self.bitmap.take();
+    self.inner = Pattern::default();
+  }
 }

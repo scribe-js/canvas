@@ -2248,6 +2248,15 @@ size_t skiac_font_collection_unregister_all(
   return removed_count;
 }
 
+// Drop the retirement FIFO — caller promises no typeface from a retired
+// provider is still in use (see rebuildAssets for the safety rule).
+size_t skiac_font_collection_clear_retired_assets(
+    skiac_font_collection* c_font_collection) {
+  size_t count = c_font_collection->retired_assets.size();
+  c_font_collection->retired_assets.clear();
+  return count;
+}
+
 bool skiac_font_collection_set_alias(skiac_font_collection* c_font_collection,
                                      const char* family,
                                      const char* alias) {

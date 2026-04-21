@@ -1232,6 +1232,8 @@ size_t skiac_font_collection_unregister_batch(
     size_t count);
 size_t skiac_font_collection_unregister_all(
     skiac_font_collection* c_font_collection);
+size_t skiac_font_collection_clear_retired_assets(
+    skiac_font_collection* c_font_collection);
 bool skiac_font_collection_set_alias(skiac_font_collection* c_font_collection,
                                      const char* family,
                                      const char* alias);

@@ -60,7 +60,7 @@ impl ImageData {
           data: data_ptr,
         })
       }
-      Either4::B(data_object) => {
+      Either4::B(mut data_object) => {
         // Uint8ClampedArray - each pixel takes 4 bytes
         let input_data_length = data_object.len();
         let width = width_or_height;
@@ -74,19 +74,16 @@ impl ImageData {
             "Index or size is negative or greater than the allowed amount".to_owned(),
           ));
         }
-        // https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/createImageData
-        // An existing ImageData object from which to copy the width and height.
-        let mut cloned_data = Uint8ClampedSlice::from_data(&env, data_object.to_vec())?;
-        let data = unsafe { cloned_data.as_mut() }.as_mut_ptr();
-        this.define_properties(&[Property::new()
-          .with_utf8_name("data")?
-          .with_value(&cloned_data)
-          .with_property_attributes(
-            PropertyAttributes::Enumerable | PropertyAttributes::Configurable,
-          )])?;
+        let data = unsafe { data_object.as_mut() }.as_mut_ptr();
         let color_space = maybe_settings
           .and_then(|settings| ColorSpace::from_str(&settings.color_space).ok())
           .unwrap_or_default();
+        this.define_properties(&[Property::new()
+          .with_utf8_name("data")?
+          .with_napi_value(&env, data_object)?
+          .with_property_attributes(
+            PropertyAttributes::Enumerable | PropertyAttributes::Configurable,
+          )])?;
         Ok(ImageData {
           width: width as usize,
           height: height as usize,
@@ -226,6 +223,23 @@ impl ObjectFinalize for Image {
 
 #[napi]
 impl Image {
+  #[napi]
+  pub fn dispose(&mut self, env: Env) -> Result<()> {
+    self.bitmap = None;
+    self.file_content = None;
+    self.src = None;
+    self._avif_image_ref = None;
+    if self.accounted_bytes != 0 {
+      env.adjust_external_memory(-self.accounted_bytes)?;
+      self.accounted_bytes = 0;
+    }
+    if let Some(decoder_task) = self.decoder_task.take() {
+      decoder_task.unref(&env)?;
+    }
+    self.complete = false;
+    Ok(())
+  }
+
   #[napi(constructor)]
   pub fn new(width: Option<f64>, height: Option<f64>, color_space: Option<String>) -> Result<Self> {
     let width = width.unwrap_or(-1.0);

@@ -282,8 +282,13 @@ interface DOMPointInit {
   y?: number
   z?: number
 }
-interface CanvasPattern {
+interface CanvasPattern extends Disposable {
   setTransform(transform?: DOMMatrix2DInit): void
+
+  /** Release the cloned source surface. See {@link Canvas.dispose}. */
+  dispose(): void
+
+  [Symbol.dispose](): void
 }
 
 interface CanvasGradient {
@@ -495,7 +500,7 @@ export class ImageData {
   constructor(data: Uint8ClampedArray | Uint16Array | Float16Array | Float32Array, sw: number, sh?: number)
 }
 
-export class Image {
+export class Image implements Disposable {
   constructor()
   // attrs only affects SVG
   constructor(width: number, height: number, attrs?: { colorSpace?: ColorSpace })
@@ -512,6 +517,12 @@ export class Image {
   onload?(): void
   onerror?(err: Error): void
   decode(): Promise<void>
+
+  /** Release the decoded bitmap synchronously. See {@link Canvas.dispose}. */
+  dispose(): void
+
+  /** ES2024 Explicit Resource Management hook. Delegates to `dispose()`. */
+  [Symbol.dispose](): void
 }
 
 export class Path2D {
@@ -621,12 +632,16 @@ export interface ContextAttributes {
   colorSpace?: ColorSpace
 }
 
-export interface SvgCanvas {
+export interface SvgCanvas extends Disposable {
   width: number
   height: number
   getContext(contextType: '2d', contextAttributes?: ContextAttributes): SKRSContext2D
 
   getContent(): Buffer
+
+  /** See {@link Canvas.dispose}. */
+  dispose(): void
+  [Symbol.dispose](): void
 }
 
 export interface AvifConfig {
@@ -804,7 +819,7 @@ export interface ConvertToBlobOptions {
   quality?: number
 }
 
-export class Canvas {
+export class Canvas implements Disposable {
   constructor(width: number, height: number, flag?: SvgExportFlag)
 
   width: number
@@ -840,6 +855,14 @@ export class Canvas {
 
   toBlob(callback: (blob: Blob | null) => void, mime?: string, quality?: number): void
   convertToBlob(options?: ConvertToBlobOptions): Promise<Blob>
+
+  /**
+   * Synchronously release the Skia surface, recorder layers, and caches.
+   */
+  dispose(): void
+
+  /** ES2024 Explicit Resource Management hook. Delegates to `dispose()`. */
+  [Symbol.dispose](): void
 }
 
 export function createCanvas(width: number, height: number): Canvas

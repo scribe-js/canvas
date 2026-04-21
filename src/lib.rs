@@ -110,10 +110,12 @@ impl<'c> CanvasElement<'c> {
     width: u32,
     height: u32,
   ) -> Result<ClassInstance<'_, CanvasRenderingContext2D>> {
-    let ctx = CanvasRenderingContext2D {
+    let mut inner = CanvasRenderingContext2D {
       context: Context::new(width, height, ColorSpace::default())?,
-    }
-    .into_instance(env)?;
+    };
+    let bytes = inner.context.expected_external_bytes();
+    inner.context.tracked_external = bytes;
+    let ctx = inner.into_instance(env)?;
     ctx.as_object(env).define_properties(&[
       Property::new()
         .with_utf8_name(FILL_STYLE_HIDDEN_NAME)?
@@ -124,7 +126,7 @@ impl<'c> CanvasElement<'c> {
         .with_napi_value(env, "#000000")?
         .with_property_attributes(PropertyAttributes::Writable | PropertyAttributes::Configurable),
     ])?;
-    env.adjust_external_memory((width * height * 4) as i64)?;
+    env.adjust_external_memory(bytes)?;
     Ok(ctx)
   }
 
@@ -147,14 +149,20 @@ impl<'c> CanvasElement<'c> {
 
   #[napi(setter)]
   pub fn set_width(&mut self, env: Env, width: i32) -> Result<()> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     let width = (if width <= 0 { 350 } else { width }) as u32;
     self.width = width;
     let height = self.height;
-    let old_ctx = mem::replace(
-      &mut self.ctx.context,
-      Context::new(width, height, ColorSpace::default())?,
-    );
-    env.adjust_external_memory((width as i64 - old_ctx.width as i64) * (height as i64) * 4)?;
+    let mut new_context = Context::new(width, height, ColorSpace::default())?;
+    let new_bytes = new_context.expected_external_bytes();
+    new_context.tracked_external = new_bytes;
+    let old_ctx = mem::replace(&mut self.ctx.context, new_context);
+    let delta = new_bytes - old_ctx.tracked_external;
+    if delta != 0 {
+      env.adjust_external_memory(delta)?;
+    }
     Ok(())
   }
 
@@ -165,14 +173,20 @@ impl<'c> CanvasElement<'c> {
 
   #[napi(setter)]
   pub fn set_height(&mut self, env: Env, height: i32) -> Result<()> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     let height = (if height <= 0 { 150 } else { height }) as u32;
     self.height = height;
     let width = self.width;
-    let old_ctx = mem::replace(
-      &mut self.ctx.context,
-      Context::new(width, height, ColorSpace::default())?,
-    );
-    env.adjust_external_memory((height as i64 - old_ctx.height as i64) * (width as i64) * 4)?;
+    let mut new_context = Context::new(width, height, ColorSpace::default())?;
+    let new_bytes = new_context.expected_external_bytes();
+    new_context.tracked_external = new_bytes;
+    let old_ctx = mem::replace(&mut self.ctx.context, new_context);
+    let delta = new_bytes - old_ctx.tracked_external;
+    if delta != 0 {
+      env.adjust_external_memory(delta)?;
+    }
     Ok(())
   }
 
@@ -182,12 +196,26 @@ impl<'c> CanvasElement<'c> {
   }
 
   #[napi]
+  pub fn dispose(&mut self, env: Env) -> Result<()> {
+    let freed = self.ctx.context.dispose();
+    self.width = 1;
+    self.height = 1;
+    if freed != 0 {
+      env.adjust_external_memory(-freed)?;
+    }
+    Ok(())
+  }
+
+  #[napi]
   pub fn get_context<'env>(
     &mut self,
     this: This,
     context_type: String,
     attrs: Option<CanvasRenderingContext2DAttributes>,
   ) -> Result<Unknown<'env>> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     if context_type != "2d" {
       return Err(Error::new(
         Status::InvalidArg,
@@ -221,6 +249,9 @@ impl<'c> CanvasElement<'c> {
     format: String,
     quality_or_config: Either3<u32, AvifConfig, Unknown>,
   ) -> Result<AsyncTask<ContextData>> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     // Flush deferred rendering before encoding
     self.ctx.context.flush();
     Ok(AsyncTask::new(
@@ -235,6 +266,9 @@ impl<'c> CanvasElement<'c> {
     format: String,
     quality_or_config: Either3<u32, AvifConfig, Unknown>,
   ) -> Result<BufferSlice<'env>> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     // Flush deferred rendering before encoding
     self.ctx.context.flush();
     let data = self.encode_inner(format, quality_or_config)?;
@@ -249,6 +283,9 @@ impl<'c> CanvasElement<'c> {
     mime: String,
     quality_or_config: Either3<u32, AvifConfig, Unknown>,
   ) -> Result<BufferSlice<'env>> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     // Flush deferred rendering before encoding
     self.ctx.context.flush();
     let mime = mime.as_str();
@@ -296,6 +333,9 @@ impl<'c> CanvasElement<'c> {
 
   #[napi]
   pub fn data<'env>(&mut self, env: Env) -> Result<BufferSlice<'env>> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     // Flush deferred rendering before reading data
     self.ctx.context.flush();
     let ctx2d = &self.ctx.context;
@@ -473,6 +513,9 @@ impl<'c> CanvasElement<'c> {
     format: String,
     quality_or_config: Either3<u32, AvifConfig, Unknown>,
   ) -> Result<ContextData> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("Canvas has been disposed"));
+    }
     let format_str = format.as_str();
     let quality = match &quality_or_config {
       Either3::A(q) => (*q) as u8,
@@ -730,10 +773,13 @@ impl<'scope> SVGCanvas<'scope> {
     // Default fallback of canvas on browser and skia-canvas is 350x150
     let width = (if width <= 0 { 350 } else { width }) as u32;
     let height = (if height <= 0 { 150 } else { height }) as u32;
+    let mut svg_inner = CanvasRenderingContext2D {
+      context: Context::new_svg(width, height, flag.into(), ColorSpace::default())?,
+    };
+    let svg_bytes = svg_inner.context.expected_external_bytes();
+    svg_inner.context.tracked_external = svg_bytes;
     let ctx = CanvasRenderingContext2D::into_instance(
-      CanvasRenderingContext2D {
-        context: Context::new_svg(width, height, flag.into(), ColorSpace::default())?,
-      },
+      svg_inner,
       env,
     )?;
     let mut ctx_obj = ctx.as_object(env);
@@ -755,7 +801,7 @@ impl<'scope> SVGCanvas<'scope> {
             | PropertyAttributes::Enumerable,
         ),
     ])?;
-    env.adjust_external_memory((width * height * 4) as i64)?;
+    env.adjust_external_memory(svg_bytes)?;
 
     Ok(Self {
       width,
@@ -833,14 +879,20 @@ impl<'scope> SVGCanvas<'scope> {
 
   #[napi(setter)]
   pub fn set_width(&mut self, env: Env, width: i32) -> Result<()> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("SVGCanvas has been disposed"));
+    }
     let width = (if width <= 0 { 350 } else { width }) as u32;
     self.width = width;
     let height = self.height;
-    let old_ctx = mem::replace(
-      &mut self.ctx.context,
-      Context::new_svg(width, height, self.flag.into(), ColorSpace::default())?,
-    );
-    env.adjust_external_memory((width as i64 - old_ctx.width as i64) * (height as i64) * 4)?;
+    let mut new_context = Context::new_svg(width, height, self.flag.into(), ColorSpace::default())?;
+    let new_bytes = new_context.expected_external_bytes();
+    new_context.tracked_external = new_bytes;
+    let old_ctx = mem::replace(&mut self.ctx.context, new_context);
+    let delta = new_bytes - old_ctx.tracked_external;
+    if delta != 0 {
+      env.adjust_external_memory(delta)?;
+    }
     Ok(())
   }
 
@@ -851,20 +903,38 @@ impl<'scope> SVGCanvas<'scope> {
 
   #[napi(setter)]
   pub fn set_height(&mut self, env: Env, height: i32) -> Result<()> {
+    if self.ctx.context.disposed {
+      return Err(Error::from_reason("SVGCanvas has been disposed"));
+    }
     let height = (if height <= 0 { 150 } else { height }) as u32;
     self.height = height;
     let width = self.width;
-    let old_ctx = mem::replace(
-      &mut self.ctx.context,
-      Context::new_svg(width, height, self.flag.into(), ColorSpace::default())?,
-    );
-    env.adjust_external_memory((width as i64) * (height as i64 - old_ctx.height as i64) * 4)?;
+    let mut new_context = Context::new_svg(width, height, self.flag.into(), ColorSpace::default())?;
+    let new_bytes = new_context.expected_external_bytes();
+    new_context.tracked_external = new_bytes;
+    let old_ctx = mem::replace(&mut self.ctx.context, new_context);
+    let delta = new_bytes - old_ctx.tracked_external;
+    if delta != 0 {
+      env.adjust_external_memory(delta)?;
+    }
     Ok(())
   }
 
   #[napi(getter)]
   pub fn get_height(&self) -> u32 {
     self.height
+  }
+
+  /// See [`CanvasElement::dispose`].
+  #[napi]
+  pub fn dispose(&mut self, env: Env) -> Result<()> {
+    let freed = self.ctx.context.dispose();
+    self.width = 1;
+    self.height = 1;
+    if freed != 0 {
+      env.adjust_external_memory(-freed)?;
+    }
+    Ok(())
   }
 }
 
@@ -1010,9 +1080,10 @@ impl PDFDocument {
     // The canvas is owned by the document, not by the Surface
     let canvas = sk::Canvas(canvas_ptr);
     let surface = sk::Surface::from_borrowed_canvas(canvas);
-    let context = Context::new_from_surface(surface, width as u32, height as u32);
-
-    env.adjust_external_memory((width as i64) * (height as i64) * 4)?;
+    let mut context = Context::new_from_surface(surface, width as u32, height as u32);
+    let bytes = context.expected_external_bytes();
+    context.tracked_external = bytes;
+    env.adjust_external_memory(bytes)?;
 
     Ok(CanvasRenderingContext2D { context })
   }

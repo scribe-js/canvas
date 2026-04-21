@@ -1082,6 +1082,10 @@ pub mod ffi {
       c_font_collection: *mut skiac_font_collection,
     ) -> usize;
 
+    pub fn skiac_font_collection_clear_retired_assets(
+      c_font_collection: *mut skiac_font_collection,
+    ) -> usize;
+
     pub fn skiac_font_collection_set_alias(
       c_font_collection: *mut skiac_font_collection,
       family: *const c_char,
@@ -4423,6 +4427,10 @@ impl FontCollection {
 
   pub fn unregister_all(&self) -> usize {
     unsafe { ffi::skiac_font_collection_unregister_all(self.0) }
+  }
+
+  pub fn clear_retired_assets(&self) -> usize {
+    unsafe { ffi::skiac_font_collection_clear_retired_assets(self.0) }
   }
 
   pub fn set_alias(&self, family: &str, alias_name: &str) -> bool {
