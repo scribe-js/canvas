@@ -58,20 +58,23 @@ pub(crate) const STROKE_STYLE_HIDDEN_NAME: &str = "_strokeStyle";
 /// controls, variation selectors, BOM).
 #[inline]
 fn is_text_sanitize_target(c: char) -> bool {
-  let code = c as u32;
-  match code {
-    0x0000 => true,
-    0x00AD | 0x034F | 0x061C => true,
-    0x115F | 0x1160 => true,
-    0x17B4 | 0x17B5 => true,
-    0x180B..=0x180E => true,
-    0x200B..=0x200F => true,
-    0x202A..=0x202E => true,
-    0x2060..=0x206F => true,
-    0xFEFF => true,
-    0xFFF0..=0xFFF8 => true,
-    _ => false,
-  }
+  matches!(
+    c as u32,
+    0x0000
+      | 0x00AD
+      | 0x034F
+      | 0x061C
+      | 0x115F
+      | 0x1160
+      | 0x17B4
+      | 0x17B5
+      | 0x180B..=0x180E
+      | 0x200B..=0x200F
+      | 0x202A..=0x202E
+      | 0x2060..=0x206F
+      | 0xFEFF
+      | 0xFFF0..=0xFFF8
+  )
 }
 
 /// Strip sanitize-target characters from `text`. Returns a borrowed `&str`

@@ -12,6 +12,7 @@ pub struct RecordingSurface {
   depth: usize, // How many layers have been rendered to surface
   width: u32,
   height: u32,
+  #[allow(dead_code)]
   color_space: ColorSpace,
 }
 
@@ -27,6 +28,7 @@ impl RecordingSurface {
   }
 
   /// Check if the surface needs to be recreated
+  #[allow(dead_code)]
   fn is_stale(&self, width: u32, height: u32, color_space: ColorSpace) -> bool {
     self.surface.is_none()
       || self.width != width
@@ -37,6 +39,7 @@ impl RecordingSurface {
   /// Update the surface with new layers from the page recorder.
   /// Only renders layers that haven't been rendered yet.
   /// Returns a reference to the surface canvas for pixel reading.
+  #[allow(dead_code)]
   pub fn update(
     &mut self,
     layers: &[SkPicture],
@@ -281,6 +284,7 @@ impl PageRecorder {
   /// Get pixels using the persistent RecordingSurface.
   /// This enables incremental rendering - only new layers are rendered.
   /// Returns pixel data for the requested region.
+  #[allow(dead_code)]
   pub fn get_pixels(
     &mut self,
     x: i32,
