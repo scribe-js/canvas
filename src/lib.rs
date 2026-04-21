@@ -778,10 +778,7 @@ impl<'scope> SVGCanvas<'scope> {
     };
     let svg_bytes = svg_inner.context.expected_external_bytes();
     svg_inner.context.tracked_external = svg_bytes;
-    let ctx = CanvasRenderingContext2D::into_instance(
-      svg_inner,
-      env,
-    )?;
+    let ctx = CanvasRenderingContext2D::into_instance(svg_inner, env)?;
     let mut ctx_obj = ctx.as_object(env);
     ctx_obj.define_properties(&[
       Property::new()

@@ -81,7 +81,12 @@ fn sanitize_text_for_shaping(text: &str) -> Cow<'_, str> {
   if !text.chars().any(is_text_sanitize_target) {
     return Cow::Borrowed(text);
   }
-  Cow::Owned(text.chars().filter(|c| !is_text_sanitize_target(*c)).collect())
+  Cow::Owned(
+    text
+      .chars()
+      .filter(|c| !is_text_sanitize_target(*c))
+      .collect(),
+  )
 }
 
 pub struct Context {
@@ -2847,34 +2852,36 @@ impl CanvasRenderingContext2D {
         let len = src.len();
         let mut arraybuffer_value = std::ptr::null_mut();
         let mut underlying_data = std::ptr::null_mut();
-        napi::check_status!(unsafe {
-          napi::sys::napi_create_arraybuffer(
-            env.raw(),
-            len,
-            &mut underlying_data,
-            &mut arraybuffer_value,
-          )
-        }, "Failed to create ArrayBuffer for getImageData")?;
+        napi::check_status!(
+          unsafe {
+            napi::sys::napi_create_arraybuffer(
+              env.raw(),
+              len,
+              &mut underlying_data,
+              &mut arraybuffer_value,
+            )
+          },
+          "Failed to create ArrayBuffer for getImageData"
+        )?;
         if len > 0 {
           unsafe {
-            std::ptr::copy_nonoverlapping(
-              src.as_ptr(),
-              underlying_data as *mut u8,
-              len,
-            );
+            std::ptr::copy_nonoverlapping(src.as_ptr(), underlying_data as *mut u8, len);
           }
         }
         let mut typed_array = std::ptr::null_mut();
-        napi::check_status!(unsafe {
-          napi::sys::napi_create_typedarray(
-            env.raw(),
-            napi::sys::TypedarrayType::uint8_clamped_array,
-            len,
-            arraybuffer_value,
-            0,
-            &mut typed_array,
-          )
-        }, "Failed to create Uint8ClampedArray for getImageData")?;
+        napi::check_status!(
+          unsafe {
+            napi::sys::napi_create_typedarray(
+              env.raw(),
+              napi::sys::TypedarrayType::uint8_clamped_array,
+              len,
+              arraybuffer_value,
+              0,
+              &mut typed_array,
+            )
+          },
+          "Failed to create Uint8ClampedArray for getImageData"
+        )?;
         drop(image_data);
         let slice: Uint8ClampedSlice =
           unsafe { <Uint8ClampedSlice as FromNapiValue>::from_napi_value(env.raw(), typed_array)? };
