@@ -154,13 +154,7 @@ impl Font {
     };
     let (size_num, size_unit) = parse_number_with_unit(size_part)
       .ok_or_else(|| SkError::InvalidFontStyle(font_rules.to_owned()))?;
-    let unit = size_unit.unwrap_or("px");
-    let size_input = if unit == "%" {
-      size_num / 100.0 * FONT_MEDIUM_PX
-    } else {
-      size_num
-    };
-    let size_px = parse_size_px(size_input, unit);
+    let size_px = parse_size_px(size_num, size_unit.unwrap_or("px"));
 
     let family_str = input[size_token.1..].trim();
     let family = if family_str.is_empty() {
