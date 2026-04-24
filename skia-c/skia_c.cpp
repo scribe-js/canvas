@@ -2175,6 +2175,77 @@ uint32_t skiac_font_collection_register_from_path(
   return typeface_id;
 }
 
+// Build an SkFontStyle with any caller-supplied fields overriding the
+// typeface's own values. Sentinel `-1` on a field means "keep the file's
+// value." Weights outside [1, 1000], widths outside [1, 9], and slants
+// outside [0, 2] are treated as sentinels.
+static SkFontStyle buildOverrideStyle(const sk_sp<SkTypeface>& typeface,
+                                      int weight,
+                                      int width,
+                                      int slant) {
+  SkFontStyle base = typeface->fontStyle();
+  int final_weight = (weight >= 1 && weight <= 1000) ? weight : base.weight();
+  int final_width = (width >= 1 && width <= 9) ? width : base.width();
+  SkFontStyle::Slant final_slant = (slant >= 0 && slant <= 2)
+                                       ? static_cast<SkFontStyle::Slant>(slant)
+                                       : base.slant();
+  return SkFontStyle(final_weight, final_width, final_slant);
+}
+
+uint32_t skiac_font_collection_register_with_style(
+    skiac_font_collection* c_font_collection,
+    const uint8_t* font,
+    size_t length,
+    const char* name_alias,
+    int weight,
+    int width,
+    int slant) {
+  auto typeface_data = SkData::MakeWithCopy(font, length);
+  auto typeface = c_font_collection->font_mgr->makeFromData(typeface_data);
+  if (!typeface) {
+    return 0;
+  }
+  SkFontStyle override = buildOverrideStyle(typeface, weight, width, slant);
+  uint32_t typeface_id;
+  if (name_alias) {
+    auto alias = SkString(name_alias);
+    typeface_id = c_font_collection->assets->registerTypefaceWithTracking(
+        typeface_data, typeface, alias, &override);
+  } else {
+    typeface_id = c_font_collection->assets->registerTypefaceWithTracking(
+        typeface_data, typeface, &override);
+  }
+  return typeface_id;
+}
+
+uint32_t skiac_font_collection_register_from_path_with_style(
+    skiac_font_collection* c_font_collection,
+    const char* font_path,
+    const char* name_alias,
+    int weight,
+    int width,
+    int slant) {
+  auto typeface = c_font_collection->font_mgr->makeFromFile(font_path);
+  if (!typeface) {
+    return 0;
+  }
+
+  std::string path_str(font_path);
+  SkFontStyle override = buildOverrideStyle(typeface, weight, width, slant);
+  uint32_t typeface_id;
+  if (name_alias) {
+    auto alias = SkString(name_alias);
+    typeface_id =
+        c_font_collection->assets->registerTypefaceFromPathWithTracking(
+            path_str, typeface, alias, &override);
+  } else {
+    typeface_id =
+        c_font_collection->assets->registerTypefaceFromPathWithTracking(
+            path_str, typeface, &override);
+  }
+  return typeface_id;
+}
+
 size_t skiac_font_collection_unregister(
     skiac_font_collection* c_font_collection,
     uint32_t typeface_id) {

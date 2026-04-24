@@ -1061,10 +1061,29 @@ pub mod ffi {
       maybe_name_alias: *const c_char,
     ) -> u32;
 
+    pub fn skiac_font_collection_register_with_style(
+      c_font_collection: *mut skiac_font_collection,
+      font: *const u8,
+      length: usize,
+      maybe_name_alias: *const c_char,
+      weight: i32,
+      width: i32,
+      slant: i32,
+    ) -> u32;
+
     pub fn skiac_font_collection_register_from_path(
       c_font_collection: *mut skiac_font_collection,
       font_path: *const c_char,
       maybe_name_alias: *const c_char,
+    ) -> u32;
+
+    pub fn skiac_font_collection_register_from_path_with_style(
+      c_font_collection: *mut skiac_font_collection,
+      font_path: *const c_char,
+      maybe_name_alias: *const c_char,
+      weight: i32,
+      width: i32,
+      slant: i32,
     ) -> u32;
 
     pub fn skiac_font_collection_unregister(
@@ -4356,6 +4375,17 @@ impl FontCollection {
   }
 
   pub fn register<S: AsRef<str>>(&self, font: &[u8], maybe_name_alias: Option<S>) -> Option<u32> {
+    self.register_with_style(font, maybe_name_alias, None, None, None)
+  }
+
+  pub fn register_with_style<S: AsRef<str>>(
+    &self,
+    font: &[u8],
+    maybe_name_alias: Option<S>,
+    weight: Option<i32>,
+    width: Option<i32>,
+    slant: Option<i32>,
+  ) -> Option<u32> {
     let name_alias_ptr = match maybe_name_alias {
       Some(name_alias) => match CString::new(name_alias.as_ref()) {
         Ok(cstring) => cstring.into_raw(),
@@ -4363,9 +4393,24 @@ impl FontCollection {
       },
       None => ptr::null_mut(),
     };
+    let has_override = weight.is_some() || width.is_some() || slant.is_some();
+    let w = weight.unwrap_or(-1);
+    let wd = width.unwrap_or(-1);
+    let sl = slant.unwrap_or(-1);
     let result = unsafe {
-      let typeface_id =
-        ffi::skiac_font_collection_register(self.0, font.as_ptr(), font.len(), name_alias_ptr);
+      let typeface_id = if has_override {
+        ffi::skiac_font_collection_register_with_style(
+          self.0,
+          font.as_ptr(),
+          font.len(),
+          name_alias_ptr,
+          w,
+          wd,
+          sl,
+        )
+      } else {
+        ffi::skiac_font_collection_register(self.0, font.as_ptr(), font.len(), name_alias_ptr)
+      };
       if typeface_id > 0 {
         Some(typeface_id)
       } else {
@@ -4386,6 +4431,17 @@ impl FontCollection {
     font_path: &str,
     maybe_name_alias: Option<S>,
   ) -> Option<u32> {
+    self.register_from_path_with_style(font_path, maybe_name_alias, None, None, None)
+  }
+
+  pub fn register_from_path_with_style<S: AsRef<str>>(
+    &self,
+    font_path: &str,
+    maybe_name_alias: Option<S>,
+    weight: Option<i32>,
+    width: Option<i32>,
+    slant: Option<i32>,
+  ) -> Option<u32> {
     if let Ok(fp) = CString::new(font_path) {
       let name_alias_ptr = match maybe_name_alias {
         Some(name) => match CString::new(name.as_ref()) {
@@ -4394,9 +4450,23 @@ impl FontCollection {
         },
         None => ptr::null_mut(),
       };
+      let has_override = weight.is_some() || width.is_some() || slant.is_some();
+      let w = weight.unwrap_or(-1);
+      let wd = width.unwrap_or(-1);
+      let sl = slant.unwrap_or(-1);
       let result = unsafe {
-        let typeface_id =
-          ffi::skiac_font_collection_register_from_path(self.0, fp.as_ptr(), name_alias_ptr);
+        let typeface_id = if has_override {
+          ffi::skiac_font_collection_register_from_path_with_style(
+            self.0,
+            fp.as_ptr(),
+            name_alias_ptr,
+            w,
+            wd,
+            sl,
+          )
+        } else {
+          ffi::skiac_font_collection_register_from_path(self.0, fp.as_ptr(), name_alias_ptr)
+        };
         if typeface_id > 0 {
           Some(typeface_id)
         } else {

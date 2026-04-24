@@ -124,6 +124,58 @@ test.serial('remove() should actually remove font from families list', (t) => {
   t.false(GlobalFonts.families.some(({ family }) => family === fontAliasName), 'Font should NOT exist after removal')
 })
 
+test.serial('register override should place font under the requested style slot', (t) => {
+  // Lato-Regular.ttf is upright weight-400. Override it as italic + bold and
+  // verify the style set reports what we asked for, not what the file says.
+  const fontAliasName = 'LatoOverrideTest-Italic'
+  const latoData = readFileSync(join(__dirname, 'fonts', 'Lato-Regular.ttf'))
+  const fontKey = GlobalFonts.register(latoData, fontAliasName, {
+    style: 'italic',
+    weight: 700,
+  })
+  t.true(fontKey instanceof FontKey)
+
+  const styleSet = GlobalFonts.families.find(({ family }) => family === fontAliasName)
+  t.truthy(styleSet, 'alias family should be present')
+  t.true(
+    styleSet!.styles.some((s) => s.style === 'italic' && s.weight === 700),
+    'override should surface as an italic/700 style entry',
+  )
+
+  GlobalFonts.remove(fontKey!)
+})
+
+test.serial('register with invalid override values rejects', (t) => {
+  const latoData = readFileSync(join(__dirname, 'fonts', 'Lato-Regular.ttf'))
+  t.throws(() => GlobalFonts.register(latoData, 'InvalidOverrideWeight', { weight: 2000 }))
+  t.throws(() => GlobalFonts.register(latoData, 'InvalidOverrideStyle', { style: 'slanted' as any }))
+  t.throws(() => GlobalFonts.register(latoData, 'InvalidOverrideStretch', { stretch: 'extra-wide' }))
+})
+
+test.serial('duplicate bytes dedup regardless of override arguments', (t) => {
+  // Per the design: identical bytes map to one FontKey. A second register
+  // call with different override descriptors must not produce a second
+  // entry — first-registration's override wins.
+  const fontAliasName = 'DedupOverrideTest'
+  const latoData = readFileSync(join(__dirname, 'fonts', 'Lato-Regular.ttf'))
+  const first = GlobalFonts.register(latoData, fontAliasName, { style: 'italic' })
+  const second = GlobalFonts.register(latoData, fontAliasName, { style: 'oblique', weight: 900 })
+  t.true(first instanceof FontKey)
+  t.true(second instanceof FontKey)
+  t.is(first!.typefaceId, second!.typefaceId, 'same bytes must produce same FontKey')
+
+  const styleSet = GlobalFonts.families.find(({ family }) => family === fontAliasName)
+  t.truthy(styleSet)
+  // Style from the first call (italic/400) should be the only entry under this alias.
+  t.true(styleSet!.styles.some((s) => s.style === 'italic' && s.weight === 400))
+  t.false(
+    styleSet!.styles.some((s) => s.style === 'oblique' || s.weight === 900),
+    "second call's override must not be applied",
+  )
+
+  GlobalFonts.remove(first!)
+})
+
 test.serial('re-registering font after removal should make it visible again', (t) => {
   const fontAliasName = 'ReRegisterTest-Font'
   const fontPath2 = join(__dirname, 'fonts', 'SourceSerifPro-Regular.ttf')

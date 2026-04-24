@@ -40,14 +40,78 @@ pub mod global_fonts {
   use napi::bindgen_prelude::*;
 
   use super::{FONT_DIR, FONT_PATH, FontKey, get_font, into_napi_error};
+  use crate::font::{FontStyle, parse_font_stretch};
+
+  /// Override descriptors applied at registration time, mirroring the browser
+  /// FontFace constructor's `style` / `weight` / `stretch` descriptors.
+  #[napi(object)]
+  pub struct FontRegisterOptions {
+    /// "normal" | "italic" | "oblique"
+    pub style: Option<String>,
+    /// Numeric weight 1..=1000
+    pub weight: Option<u32>,
+    /// CSS font-stretch keyword or percentage
+    /// (e.g. "condensed", "100%", "ultra-expanded")
+    pub stretch: Option<String>,
+  }
+
+  fn resolve_override(
+    options: Option<FontRegisterOptions>,
+  ) -> Result<(Option<i32>, Option<i32>, Option<i32>)> {
+    let Some(opts) = options else {
+      return Ok((None, None, None));
+    };
+    let weight = match opts.weight {
+      Some(w) if (1..=1000).contains(&w) => Some(w as i32),
+      Some(w) => {
+        return Err(Error::new(
+          Status::InvalidArg,
+          format!("weight must be between 1 and 1000, got {w}"),
+        ));
+      }
+      None => None,
+    };
+    let width = match opts.stretch.as_deref() {
+      Some(s) => match parse_font_stretch(s) {
+        Some(stretch) => Some(stretch as i32),
+        None => {
+          return Err(Error::new(
+            Status::InvalidArg,
+            format!("unrecognized font-stretch value: {s:?}"),
+          ));
+        }
+      },
+      None => None,
+    };
+    let slant = match opts.style.as_deref() {
+      Some(s) => match s.parse::<FontStyle>() {
+        Ok(FontStyle::Normal) => Some(0),
+        Ok(FontStyle::Italic) => Some(1),
+        Ok(FontStyle::Oblique) => Some(2),
+        Err(_) => {
+          return Err(Error::new(
+            Status::InvalidArg,
+            format!("style must be 'normal', 'italic', or 'oblique', got {s:?}"),
+          ));
+        }
+      },
+      None => None,
+    };
+    Ok((weight, width, slant))
+  }
 
   #[napi]
-  pub fn register(font_data: &[u8], name_alias: Option<String>) -> Result<Option<FontKey>> {
+  pub fn register(
+    font_data: &[u8],
+    name_alias: Option<String>,
+    options: Option<FontRegisterOptions>,
+  ) -> Result<Option<FontKey>> {
     let maybe_name_alias = name_alias.and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let (weight, width, slant) = resolve_override(options)?;
     let font = get_font().map_err(into_napi_error)?;
     Ok(
       font
-        .register(font_data, maybe_name_alias)
+        .register_with_style(font_data, maybe_name_alias, weight, width, slant)
         .map(|typeface_id| FontKey { typeface_id }),
     )
   }
@@ -77,12 +141,14 @@ pub mod global_fonts {
   pub fn register_from_path(
     font_path: String,
     name_alias: Option<String>,
+    options: Option<FontRegisterOptions>,
   ) -> Result<Option<FontKey>> {
     let maybe_name_alias = name_alias.and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let (weight, width, slant) = resolve_override(options)?;
     let font = get_font().map_err(into_napi_error)?;
     Ok(
       font
-        .register_from_path(font_path.as_str(), maybe_name_alias)
+        .register_from_path_with_style(font_path.as_str(), maybe_name_alias, weight, width, slant)
         .map(|typeface_id| FontKey { typeface_id }),
     )
   }

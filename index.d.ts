@@ -890,12 +890,30 @@ export interface FontVariationAxis {
   hidden: boolean
 }
 
+/**
+ * Override descriptors applied when a font is registered, mirroring the
+ * browser FontFace constructor's `style` / `weight` / `stretch` descriptors.
+ *
+ * Calling `register` twice with identical bytes dedups to a single entry regardless
+ * of whether the second call supplied an override; the first registration's
+ * override wins. To change an override, `remove` the existing `FontKey`
+ * and register again.
+ */
+export interface FontRegisterOptions {
+  /** "normal" | "italic" | "oblique" */
+  style?: 'normal' | 'italic' | 'oblique'
+  /** Numeric weight in 1..=1000 */
+  weight?: number
+  /** CSS font-stretch keyword or percentage (e.g. "condensed", "100%") */
+  stretch?: string
+}
+
 interface IGlobalFonts {
   readonly families: { family: string; styles: { weight: number; width: string; style: string }[] }[]
   // return FontKey if succeeded, null if failed
-  register(font: Buffer, nameAlias?: string): FontKey | null
+  register(font: Buffer, nameAlias?: string, options?: FontRegisterOptions): FontKey | null
   // absolute path - returns FontKey if succeeded, null if failed
-  registerFromPath(path: string, nameAlias?: string): FontKey | null
+  registerFromPath(path: string, nameAlias?: string, options?: FontRegisterOptions): FontKey | null
   has(name: string): boolean
   loadFontsFromDir(path: string): number
   /**
