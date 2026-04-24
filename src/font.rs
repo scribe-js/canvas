@@ -1,11 +1,6 @@
 use std::str::FromStr;
-use std::sync::OnceLock;
-
-use regex::Regex;
 
 use crate::error::SkError;
-
-pub(crate) static FONT_REGEXP: OnceLock<Regex> = OnceLock::new();
 
 const DEFAULT_FONT: &str = "sans-serif";
 
@@ -46,94 +41,187 @@ impl Default for Font {
 }
 
 impl Font {
+  // CSS shorthand grammar:
+  //   [ <font-style> || <font-variant-css2> || <font-weight> || <font-stretch> ]?
+  //     <font-size> [/<line-height>]? <font-family>
+  //
+  // Descriptors appear in any order before the size token. Each descriptor may
+  // appear at most once. The literal `normal` is the initial value of every
+  // descriptor, so it is accepted but ignored — treating it as style would
+  // overwrite an earlier explicit keyword (this was the previous regex's bug
+  // with `italic normal 48px Foo`). A descriptor's value-set uniquely identifies
+  // it except for `normal` and `NN%` (which can be either a stretch percentage
+  // or the size itself). The percentage ambiguity is resolved by lookahead: a
+  // numeric-leading token that has no subsequent numeric-leading token is the
+  // size; otherwise it is a descriptor candidate.
   pub fn new(font_rules: &str) -> Result<Font, SkError> {
-    let font_regexp = FONT_REGEXP.get_or_init(init_font_regexp);
-    let default_font = Font::default();
-    if let Some(cap) = font_regexp.captures(font_rules) {
-      let size_str = cap.get(7).or_else(|| cap.get(5)).unwrap().as_str();
-      let size = if size_str.ends_with('%') {
-        size_str
-          .parse::<f32>()
-          .map(|v| v / 100.0 * FONT_MEDIUM_PX)
-          .ok()
-      } else {
-        size_str.parse::<f32>().ok()
-      };
-      let family = cap.get(11).map(|c| c.as_str()).unwrap_or(DEFAULT_FONT);
-      // return if no valid size
-      if let Some(size) = size {
-        let style = cap
-          .get(2)
-          .and_then(|m| FontStyle::from_str(m.as_str()).ok())
-          .unwrap_or(default_font.style);
-        let variant = cap
-          .get(3)
-          .and_then(|m| FontVariant::from_str(m.as_str()).ok())
-          .unwrap_or(default_font.variant);
-        let weight = cap
-          .get(4)
-          .and_then(|m| parse_font_weight(m.as_str()))
-          .unwrap_or(default_font.weight);
-        // treat stretch as size
-        // the `20%` of '20% Arial' is treated as `stretch` but it's size actually
-        let stretch = if cap.get(6).is_none() {
-          default_font.stretch
-        } else {
-          cap
-            .get(5)
-            .and_then(|m| parse_font_stretch(m.as_str()))
-            .unwrap_or(default_font.stretch)
-        };
-        let size_px = parse_size_px(size, cap.get(8).map(|m| m.as_str()).unwrap_or("px"));
-        Ok(Font {
-          style,
-          variant,
-          weight,
-          size: size_px,
-          stretch,
-          family: family
-            .split(',')
-            .map(|string| string.trim())
-            .map(|s| {
-              if s.starts_with('"') || s.starts_with('\'') {
-                unsafe { s.get_unchecked(1..s.len() - 1) }
-              } else {
-                s
-              }
-            })
-            .collect::<Vec<&str>>()
-            .join(","),
-        })
-      } else {
-        Err(SkError::InvalidFontStyle(font_rules.to_owned()))
-      }
-    } else {
-      Err(SkError::InvalidFontStyle(font_rules.to_owned()))
+    let input = font_rules.trim();
+    if input.is_empty() {
+      return Err(SkError::InvalidFontStyle(font_rules.to_owned()));
     }
+
+    let default_font = Font::default();
+    let mut style: Option<FontStyle> = None;
+    let mut variant: Option<FontVariant> = None;
+    let mut weight: Option<u32> = None;
+    let mut stretch: Option<FontStretch> = None;
+
+    let bytes = input.as_bytes();
+    let mut cursor = 0usize;
+
+    let size_token = loop {
+      while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+      }
+      if cursor >= bytes.len() {
+        return Err(SkError::InvalidFontStyle(font_rules.to_owned()));
+      }
+      let token_start = cursor;
+      while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+      }
+      let token = &input[token_start..cursor];
+
+      if token == "normal" {
+        // `normal` is accepted by every descriptor; committing it would overwrite
+        // an earlier explicit keyword. Since every descriptor's default is already
+        // normal, skipping the token is equivalent to setting whichever descriptor
+        // was intended without clobbering ones already assigned.
+        continue;
+      }
+
+      let numeric_leading = token
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit() || c == '.');
+
+      if numeric_leading {
+        // A numeric-leading token is a descriptor candidate only if another
+        // numeric-leading token follows — the final one is the size.
+        if !has_following_numeric_token(&input[cursor..]) {
+          break (token_start, cursor);
+        }
+        if token.ends_with('%') && stretch.is_none() {
+          if let Some(s) = parse_font_stretch(token) {
+            stretch = Some(s);
+          }
+          // Unrecognized percentages (e.g. "52%") are consumed without effect,
+          // matching prior regex behavior.
+          continue;
+        }
+        if weight.is_none()
+          && let Some(w) = parse_font_weight(token)
+        {
+          weight = Some(w);
+          continue;
+        }
+        // Numeric token with no applicable unassigned descriptor: treat as size.
+        break (token_start, cursor);
+      }
+
+      if style.is_none()
+        && let Ok(s) = FontStyle::from_str(token)
+      {
+        // `normal` handled above; only italic/oblique reach here.
+        style = Some(s);
+        continue;
+      }
+      if variant.is_none() && token == "small-caps" {
+        variant = Some(FontVariant::SmallCaps);
+        continue;
+      }
+      if weight.is_none()
+        && let Some(w) = parse_font_weight(token)
+      {
+        weight = Some(w);
+        continue;
+      }
+      if stretch.is_none()
+        && let Some(s) = parse_font_stretch(token)
+      {
+        stretch = Some(s);
+        continue;
+      }
+
+      // Unrecognized non-numeric token before a size was found: malformed input.
+      return Err(SkError::InvalidFontStyle(font_rules.to_owned()));
+    };
+
+    let size_raw = &input[size_token.0..size_token.1];
+    let size_part = match size_raw.find('/') {
+      Some(i) => &size_raw[..i],
+      None => size_raw,
+    };
+    let (size_num, size_unit) = parse_number_with_unit(size_part)
+      .ok_or_else(|| SkError::InvalidFontStyle(font_rules.to_owned()))?;
+    let unit = size_unit.unwrap_or("px");
+    let size_input = if unit == "%" {
+      size_num / 100.0 * FONT_MEDIUM_PX
+    } else {
+      size_num
+    };
+    let size_px = parse_size_px(size_input, unit);
+
+    let family_str = input[size_token.1..].trim();
+    let family = if family_str.is_empty() {
+      default_font.family.clone()
+    } else {
+      family_str
+        .split(',')
+        .map(|s| s.trim())
+        .map(strip_family_quotes)
+        .collect::<Vec<&str>>()
+        .join(",")
+    };
+
+    Ok(Font {
+      size: size_px,
+      style: style.unwrap_or(default_font.style),
+      variant: variant.unwrap_or(default_font.variant),
+      weight: weight.unwrap_or(default_font.weight),
+      stretch: stretch.unwrap_or(default_font.stretch),
+      family,
+    })
   }
 }
 
-// [ [ <'font-style'> || <font-variant-css21> || <'font-weight'> || <'font-stretch'> ]? <'font-size'> [ / <'line-height'> ]? <'font-family'> ] | caption | icon | menu | message-box | small-caption | status-barwhere <font-variant-css21> = [ normal | small-caps ]
-pub(crate) fn init_font_regexp() -> Regex {
-  Regex::new(
-    r#"(?x)
-    (
-      (italic|oblique|normal){0,1}\s+              |  # style
-      (small-caps|normal){0,1}\s+                  |  # variant
-      (bold|bolder|lighter|[1-9]00|normal){0,1}\s+ |  # weight
-      (ultra-condensed|extra-condensed|condensed|semi-condensed|semi-expanded|expanded|extra-expanded|ultra-expanded|[\d\.]+%){0,1}\s+ # stretch
-    ){0,4}
-    (
-      ([\d\.]+)                                       # size
-      (%|px|pt|pc|in|cm|mm|%|em|ex|ch|rem|q)?\s*      # unit
-    )
-    (/[\d\.]+(%|px|pt|pc|in|cm|mm|%|em|ex|ch|rem|q)?\s*)? # optional line height
-    # line-height is ignored here, as per the spec
-    # Borrowed from https://github.com/Automattic/node-canvas/blob/master/lib/parse-font.js#L21
-    ((?:'([^']+)'|"([^"]+)"|[\w\s-]+)(\s*,\s*(?:'([^']+)'|"([^"]+)"|[\w\s-]+))*)?                                            # family
-  "#,
-  )
-  .unwrap()
+// Lookahead used to disambiguate stretch-percentage vs size-percentage. If a
+// later whitespace-separated token starts with a digit or '.', the current
+// numeric-leading token is not the size.
+fn has_following_numeric_token(rest: &str) -> bool {
+  rest
+    .split_ascii_whitespace()
+    .next()
+    .and_then(|t| t.chars().next())
+    .is_some_and(|c| c.is_ascii_digit() || c == '.')
+}
+
+// Extracts (number, unit) from a size token like "48", "48px", "50%", "1.2em".
+// Returns None for tokens that do not begin with a parseable decimal number.
+fn parse_number_with_unit(token: &str) -> Option<(f32, Option<&str>)> {
+  let unit_start = token
+    .find(|c: char| !c.is_ascii_digit() && c != '.')
+    .unwrap_or(token.len());
+  if unit_start == 0 {
+    return None;
+  }
+  let num: f32 = token[..unit_start].parse().ok()?;
+  let unit = if unit_start == token.len() {
+    None
+  } else {
+    Some(&token[unit_start..])
+  };
+  Some((num, unit))
+}
+
+fn strip_family_quotes(s: &str) -> &str {
+  if s.len() >= 2
+    && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+  {
+    &s[1..s.len() - 1]
+  } else {
+    s
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,36 +479,62 @@ fn test_parse_size_px() {
   assert_eq!(parse_size_px(2.0, "em"), 32.0f32);
 }
 
+// Covers the parser bug where `normal` following an explicit style/weight/
+// stretch keyword was silently overwriting the earlier keyword, making
+// `italic normal 48px F` render identically to `normal normal 48px F`.
 #[test]
-fn test_font_regexp() {
-  let reg = init_font_regexp();
-  let caps = reg.captures("1.2em \"Fira Sans\"");
-  assert!(caps.is_some());
-  let caps = caps.unwrap();
-  for i in 1usize..=5usize {
-    assert_eq!(caps.get(i), None);
+fn test_font_shorthand_normal_does_not_overwrite() {
+  let cases: &[(&str, FontStyle, u32, FontStretch, FontVariant)] = &[
+    (
+      "italic normal 48px Foo",
+      FontStyle::Italic,
+      400,
+      FontStretch::Normal,
+      FontVariant::Normal,
+    ),
+    (
+      "italic normal normal 48px Foo",
+      FontStyle::Italic,
+      400,
+      FontStretch::Normal,
+      FontVariant::Normal,
+    ),
+    (
+      "normal italic 48px Foo",
+      FontStyle::Italic,
+      400,
+      FontStretch::Normal,
+      FontVariant::Normal,
+    ),
+    (
+      "oblique bold normal 48px Foo",
+      FontStyle::Oblique,
+      700,
+      FontStretch::Normal,
+      FontVariant::Normal,
+    ),
+    (
+      "bold normal condensed italic 48px Foo",
+      FontStyle::Italic,
+      700,
+      FontStretch::Condensed,
+      FontVariant::Normal,
+    ),
+    (
+      "small-caps normal 48px Foo",
+      FontStyle::Normal,
+      400,
+      FontStretch::Normal,
+      FontVariant::SmallCaps,
+    ),
+  ];
+  for (rule, style, weight, stretch, variant) in cases {
+    let font = Font::new(rule).unwrap();
+    assert_eq!(font.style, *style, "style for rule = {rule:?}");
+    assert_eq!(font.weight, *weight, "weight for rule = {rule:?}");
+    assert_eq!(font.stretch, *stretch, "stretch for rule = {rule:?}");
+    assert_eq!(font.variant, *variant, "variant for rule = {rule:?}");
   }
-  // size
-  assert_eq!(caps.get(7).map(|m| m.as_str()), Some("1.2"));
-  // unit
-  assert_eq!(caps.get(8).map(|m| m.as_str()), Some("em"));
-  // family
-  assert_eq!(caps.get(11).map(|m| m.as_str()), Some("\"Fira Sans\""));
-}
-
-#[test]
-fn test_font_regexp_order1() {
-  let reg = init_font_regexp();
-  let caps = reg.captures("bold italic 50px Arial, sans-serif");
-  assert!(caps.is_some());
-  let caps = caps.unwrap();
-  assert_eq!(caps.get(2).map(|m| m.as_str()), Some("italic")); // style
-  assert_eq!(caps.get(3), None); // variant
-  assert_eq!(caps.get(4).map(|m| m.as_str()), Some("bold")); // weight
-  assert_eq!(caps.get(5), None); // stretch
-  assert_eq!(caps.get(7).map(|m| m.as_str()), Some("50")); // size
-  assert_eq!(caps.get(8).map(|m| m.as_str()), Some("px")); // unit
-  assert_eq!(caps.get(11).map(|m| m.as_str()), Some("Arial, sans-serif")); // family
 }
 
 #[test]

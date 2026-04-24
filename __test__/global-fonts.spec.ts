@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import test from 'ava'
 
-import { GlobalFonts, FontKey } from '../index'
+import { GlobalFonts, FontKey, createCanvas } from '../index'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const fontPath = join(__dirname, 'fonts', 'SourceSerifPro-Regular.ttf')
@@ -174,6 +174,60 @@ test.serial('duplicate bytes dedup regardless of override arguments', (t) => {
   )
 
   GlobalFonts.remove(first!)
+})
+
+test.serial('ctx.font italic keyword picks the italic-classified variant when two variants share an alias', (t) => {
+  // Integration regression for user report #2: register two distinct font
+  // files under one family alias, the second overridden to italic. Rendering
+  // with `italic ...` in ctx.font must produce different pixels than rendering
+  // with `normal ...`. The prior regex parser silently dropped the italic
+  // keyword whenever `normal` appeared after it (e.g. `italic normal 48px F`
+  // was parsed the same as `normal normal 48px F`), which collapsed both
+  // renders to the same variant regardless of how many variants were
+  // registered. Uses two different font files so that the registry dedup path
+  // does not merge the two entries.
+  const alias = 'StyleKeywordRegression'
+  const regBytes = readFileSync(join(__dirname, 'fonts', 'SourceSerifPro-Regular.ttf'))
+  const italBytes = readFileSync(join(__dirname, 'fonts', 'Lato-Regular.ttf'))
+  const k1 = GlobalFonts.register(regBytes, alias, { style: 'normal', weight: 400 })
+  const k2 = GlobalFonts.register(italBytes, alias, { style: 'italic', weight: 400 })
+
+  const render = (fontStr: string) => {
+    const c = createCanvas(240, 80)
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = 'white'
+    ctx.fillRect(0, 0, 240, 80)
+    ctx.fillStyle = 'black'
+    ctx.font = fontStr
+    ctx.textBaseline = 'alphabetic'
+    ctx.fillText('Helo', 8, 56)
+    return ctx.getImageData(0, 0, 240, 80).data
+  }
+  const pixelDiff = (x: Uint8ClampedArray, y: Uint8ClampedArray) => {
+    let d = 0
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) d++
+    return d
+  }
+
+  // Exact reproduction from user report #2 — three tokens, with a trailing
+  // `normal`. Pre-fix this collapsed to 0 byte difference.
+  t.true(
+    pixelDiff(render(`italic normal 48px ${alias}`), render(`normal normal 48px ${alias}`)) > 0,
+    'italic keyword followed by `normal` must still pick the italic variant',
+  )
+  // Two-token style/size shorthand.
+  t.true(
+    pixelDiff(render(`italic 48px ${alias}`), render(`normal 48px ${alias}`)) > 0,
+    'two-token italic/normal shorthand must pick distinct variants',
+  )
+  // Style keyword at the end.
+  t.true(
+    pixelDiff(render(`normal italic 48px ${alias}`), render(`normal normal 48px ${alias}`)) > 0,
+    'italic keyword at the end must still pick the italic variant',
+  )
+
+  GlobalFonts.remove(k1!)
+  GlobalFonts.remove(k2!)
 })
 
 test.serial('re-registering font after removal should make it visible again', (t) => {
