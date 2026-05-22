@@ -2494,6 +2494,26 @@ pub struct FontVariation {
   pub value: f32,
 }
 
+/// scribe.js fork.
+fn is_default_ignorable_crasher(c: char) -> bool {
+  matches!(c as u32,
+    0x00AD
+    | 0x034F
+    | 0x061C
+    | 0x17B4..=0x17B5
+    | 0x180B..=0x180E
+    | 0x200B..=0x200F
+    | 0x202A..=0x202E
+    | 0x2060..=0x206F
+    | 0xFE00..=0xFE0F
+    | 0xFEFF
+    | 0xFFF0..=0xFFF8
+    | 0x1D173..=0x1D17A
+    | 0xE0000 | 0xE0001
+    | 0xE0020..=0xE007F
+    | 0xE0100..=0xE01EF)
+}
+
 impl Canvas {
   pub fn clear(&mut self) {
     unsafe {
@@ -2634,17 +2654,13 @@ impl Canvas {
     text_rendering: TextRendering,
   ) -> Result<(), NulError> {
     // scribe.js fork
-    // `text` does not go through CString — the FFI call takes an explicit
-    // (*const c_char, usize) pair and the C++ side (skiac_canvas_*_draw_text ->
-    // builder.addText) is fully length-aware, so wrapping in a CString just
-    // rejects any string containing an interior NUL. scribe.js's renderer can
-    // produce such strings when a CID's ToUnicode mapping is missing and the
-    // fallback is U+0000, which used to abort the whole node process.
-    //
-    // `font_family` and `lang` still need NUL-terminated C strings because the
-    // C++ side parses them with SkStrSplit / strcmp; strip any interior NULs
-    // defensively before CString::new so the binding never panics on malformed
-    // input.
+    if !text
+      .chars()
+      .any(|c| c as u32 != 0 && !is_default_ignorable_crasher(c))
+    {
+      return Ok(());
+    }
+    // scribe.js fork
     let font_family_stripped;
     let font_family = if font_family.contains('\0') {
       font_family_stripped = font_family.replace('\0', "");
@@ -2748,6 +2764,15 @@ impl Canvas {
     };
 
     let mut line_metrics = ffi::skiac_line_metrics::default();
+
+    // scribe.js fork: see draw_text. Skip shaping for a run that is entirely
+    // default-ignorable (or NUL) to avoid the ParagraphBuilder SIGSEGV.
+    if !text
+      .chars()
+      .any(|c| c as u32 != 0 && !is_default_ignorable_crasher(c))
+    {
+      return Ok(line_metrics);
+    }
 
     unsafe {
       ffi::skiac_canvas_get_line_metrics_or_draw_text(

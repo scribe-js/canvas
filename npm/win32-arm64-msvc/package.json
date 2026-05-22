@@ -1,6 +1,6 @@
 {
   "name": "@scribe.js/canvas-win32-arm64-msvc",
-  "version": "0.1.97-scribe.4",
+  "version": "0.1.97-scribe.5",
   "os": [
     "win32"
   ],
