@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::picture_recorder::PictureRecorder;
 use crate::sk::{
   Canvas, ColorSpace, FilterQuality, Matrix, Path as SkPath, SkImage, SkPicture, Surface,
@@ -98,7 +100,7 @@ pub struct PageRecorder {
   layers_at_cache: usize, // Layer count when cached_picture was created
   recording_surface: RecordingSurface, // Persistent surface for incremental rendering
   current_transform: Option<Matrix>, // Transform to restore after layer promotion
-  current_clip: Option<SkPath>, // Clip path to restore after layer promotion
+  clip_stack: Vec<Rc<SkPath>>, // Clip stack (device space) to replay after layer promotion
   save_count: usize, // Track save stack depth to restore after layer promotion
 }
 
@@ -118,7 +120,7 @@ impl PageRecorder {
       layers_at_cache: 0,
       recording_surface: RecordingSurface::new(),
       current_transform: None,
-      current_clip: None,
+      clip_stack: Vec::new(),
       save_count: 0,
     }
   }
@@ -132,9 +134,11 @@ impl PageRecorder {
       for _ in 0..self.save_count {
         canvas.save();
       }
-      if let Some(ref clip_path) = self.current_clip {
+      if !self.clip_stack.is_empty() {
         canvas.reset_transform();
-        canvas.set_clip_path(clip_path);
+        for clip_path in &self.clip_stack {
+          canvas.set_clip_path(clip_path);
+        }
       }
       if let Some(ref transform) = self.current_transform {
         canvas.set_transform(transform);
@@ -170,9 +174,9 @@ impl PageRecorder {
     self.current_transform = Some(transform.clone());
   }
 
-  /// Set the current clip path to restore after layer promotion
-  pub fn set_clip(&mut self, clip_path: Option<SkPath>) {
-    self.current_clip = clip_path;
+  /// Set the current clip stack to replay after layer promotion
+  pub fn set_clip(&mut self, clip_stack: Vec<Rc<SkPath>>) {
+    self.clip_stack = clip_stack;
   }
 
   /// Increment save count (called when ctx.save() is invoked)
@@ -276,7 +280,7 @@ impl PageRecorder {
     self.recording_surface.reset();
     // Reset transform and clip state
     self.current_transform = None;
-    self.current_clip = None;
+    self.clip_stack.clear();
     // Reset save count
     self.save_count = 0;
   }

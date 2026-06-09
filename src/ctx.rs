@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::f32::consts::PI;
 use std::mem;
+use std::rc::Rc;
 use std::result;
 use std::slice;
 use std::str::FromStr;
@@ -33,8 +34,8 @@ use crate::{
   pattern::{CanvasPattern, Pattern},
   sk::{
     AlphaType, Bitmap, BlendMode, ColorSpace, FillType, FontVariantCaps, ImageFilter, LineMetrics,
-    MaskFilter, Matrix, Paint, PaintStyle, Path as SkPath, PathEffect, PathOp,
-    SkEncodedImageFormat, SkWMemoryStream, SkiaDataRef, Surface, SurfaceRef, Transform,
+    MaskFilter, Matrix, Paint, PaintStyle, Path as SkPath, PathEffect, SkEncodedImageFormat,
+    SkWMemoryStream, SkiaDataRef, Surface, SurfaceRef, Transform,
   },
   state::Context2dRenderingState,
 };
@@ -219,7 +220,10 @@ impl Context {
   /// Sync clip state to PageRecorder for restoration after layer promotion
   fn sync_clip_to_recorder(&self) {
     if let Some(ref recorder) = self.page_recorder {
-      recorder.borrow_mut().set_clip(self.state.clip_path.clone());
+      // Cloning a Vec<Rc<SkPath>> bumps refcounts only -- no path geometry is copied.
+      recorder
+        .borrow_mut()
+        .set_clip(self.state.clip_stack.clone());
     }
   }
 
@@ -318,21 +322,11 @@ impl Context {
       }
     };
 
-    // For state tracking (used by save/restore and layer promotion), compute the
-    // cumulative clip in device space. Transform the new path by the current CTM
-    // and intersect with the existing device-space clip.
+    // Transform a copy of the clip into device space.
+    // The clip stack (pushed below) holds clips in device space so they can be replayed at identity transform
+    // after a layer promotion or deferred restore rebuilds Skia's native clip stack.
     let mut device_clip = clip_path.clone();
     device_clip.transform_self(&self.state.transform);
-
-    if let Some(ref existing_clip) = self.state.clip_path
-      && !device_clip.op(existing_clip, PathOp::Intersect)
-    {
-      #[cfg(debug_assertions)]
-      eprintln!("Warning: Path intersection operation failed in clip()");
-      // op() failed (degenerate paths). Skip both Skia and state update
-      // to avoid divergence between tracked state and actual canvas clip.
-      return;
-    }
 
     // Pass the raw path to Skia. Skia's clipPath() is cumulative and applies the
     // current canvas CTM, so it correctly handles nested clips at different transforms.
@@ -340,7 +334,9 @@ impl Context {
       canvas.set_clip_path(&clip_path);
     });
 
-    self.state.clip_path = Some(device_clip);
+    // `Rc` so cloning the state (on every save/sync) shares this path instead of
+    // deep-copying its geometry (`Path::clone` rebuilds an SkPathBuilder).
+    self.state.clip_stack.push(Rc::new(device_clip));
     self.sync_clip_to_recorder();
   }
 
@@ -363,7 +359,7 @@ impl Context {
       && (y + height) >= self.height as f32
       && self.page_recorder.is_some()
       && self.state.transform.get_transform().is_identity()
-      && self.state.clip_path.is_none()
+      && self.state.clip_stack.is_empty()
       && self.states.is_empty()
     {
       // Full canvas clear - reset layers instead of accumulating
@@ -433,13 +429,16 @@ impl Context {
       // restore the correct state.
       if self.page_recorder.is_some() {
         let transform = self.state.transform.clone();
-        let clip = self.state.clip_path.clone();
-        // Re-apply clip if the restored state has one.
-        // The clip is stored in device space, so apply at identity transform first.
-        if let Some(ref clip_path) = clip {
+        // Cheap clone (Rc refcount bumps) so the closure doesn't borrow `self.state`.
+        let clips = self.state.clip_stack.clone();
+        // Replay each clip of the restored state onto Skia's native clip stack.
+        // The clips are stored in device space, so apply them at identity transform first.
+        if !clips.is_empty() {
           self.with_canvas_state(|canvas| {
             canvas.reset_transform();
-            canvas.set_clip_path(clip_path);
+            for clip_path in &clips {
+              canvas.set_clip_path(clip_path);
+            }
           });
         }
         // Then restore the actual transform

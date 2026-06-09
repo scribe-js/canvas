@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use rgb::RGBA;
 
 use crate::sk::{BlendMode, ImageFilter, Matrix, Path as SkPath};
@@ -49,7 +51,9 @@ pub struct Context2dRenderingState {
   pub filter: Option<ImageFilter>,
   pub filters_string: String,
   pub global_composite_operation: BlendMode,
-  pub clip_path: Option<SkPath>,
+  /// Active clips at this state level, in application order, each in device space.
+  /// Replayed onto Skia's native clip stack after a deferred restore or layer promotion.
+  pub clip_stack: Vec<Rc<SkPath>>,
 }
 
 impl Default for Context2dRenderingState {
@@ -91,7 +95,7 @@ impl Default for Context2dRenderingState {
       filter: None,
       filters_string: "none".to_owned(),
       global_composite_operation: BlendMode::default(),
-      clip_path: None,
+      clip_stack: Vec::new(),
     }
   }
 }
