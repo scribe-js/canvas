@@ -338,16 +338,13 @@ jobs:
     name: stable - armv7-linux - build skia
     runs-on: ubuntu-latest
     container:
-      image: debian:bullseye-20260406
+      image: debian:bookworm
 
     steps:
       - name: Setup tools
         run: |
           apt-get update
-          apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libatomic1-armhf-cross git build-essential cmake ninja-build wget curl python3
-          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-          apt-get install -y nodejs
-          npm install -g yarn corepack
+          apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libatomic1-armhf-cross git build-essential cmake ninja-build wget curl python3
           ln -s /usr/bin/python3 /usr/bin/python
       - uses: actions/checkout@v6
         with:
