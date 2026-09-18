@@ -416,6 +416,18 @@ test.serial('removeAll() should remove all registered fonts', (t) => {
   t.false(GlobalFonts.families.some((f) => f.family === 'RemoveAllTest-Font2'))
 })
 
+// Freeing a retired provider aborts the process on macOS arm64 if skia_c.cpp is compiled in Skia's debug mode
+test.serial('clearRetired() should release the providers retired by font removal', (t) => {
+  const fontKey = GlobalFonts.register(fontData, 'ClearRetiredTest-Font')
+  t.true(fontKey instanceof FontKey)
+
+  GlobalFonts.clearRetired()
+
+  t.is(GlobalFonts.removeBatch([fontKey!]), 1)
+  t.is(GlobalFonts.clearRetired(), 1, 'One removal should retire exactly one provider')
+  t.is(GlobalFonts.clearRetired(), 0, 'Nothing should be left to release')
+})
+
 test.serial('setAlias() should return false for non-existent font', (t) => {
   const result = GlobalFonts.setAlias('NonExistentFont12345', 'MyAlias')
   t.false(result, 'setAlias should return false for non-existent font')

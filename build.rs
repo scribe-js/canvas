@@ -40,7 +40,12 @@ fn main() {
 
   let mut build = cc::Build::new();
 
-  build.cpp(true).file("skia-c/skia_c.cpp");
+  // Skia's inline ref-counting code can abort when its debug and release modes mix, so skia_c.cpp must match the release-built Skia libraries (`is_debug=false` in scripts/build-skia.js).
+  // Without this define Skia's headers fall back to SK_DEBUG, even in a release build.
+  build
+    .cpp(true)
+    .file("skia-c/skia_c.cpp")
+    .define("SK_RELEASE", None);
 
   if compile_target.as_str() == "aarch64-linux-android" {
     let nkd_home = env::var("ANDROID_NDK_LATEST_HOME").unwrap();

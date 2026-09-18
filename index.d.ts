@@ -937,6 +937,12 @@ interface IGlobalFonts {
    */
   removeAll(): number
   /**
+   * Release the font providers retired by earlier removals.
+   * Only safe when no typeface from a retired provider is still in use.
+   * @returns Number of providers released
+   */
+  clearRetired(): number
+  /**
    * Get variation axes for a specific font instance
    * @param familyName The font family name
    * @param weight Font weight (100-900)
