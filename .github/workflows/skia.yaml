@@ -327,6 +327,12 @@ jobs:
     steps:
       - name: Setup tools
         run: |
+          sed -i 's|^deb http://deb.debian.org/debian-security|deb [check-valid-until=no] http://deb.debian.org/debian-security|' /etc/apt/sources.list
+          echo "deb [check-valid-until=no] http://security.debian.org/debian-security bullseye-security main" >> /etc/apt/sources.list
+          # Snapshot runs from 2026-09-04 on no longer hold the package files.
+          # An earlier run can lack the newest versions, and apt only falls back to a source that lists the exact version it chose.
+          echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260831T211327Z bullseye-security main" >> /etc/apt/sources.list
+          echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80retries
           apt-get update
           apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libatomic1-armhf-cross git build-essential cmake ninja-build wget curl python3
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
