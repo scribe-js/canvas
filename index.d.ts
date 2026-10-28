@@ -869,6 +869,10 @@ export function createCanvas(width: number, height: number): Canvas
 
 export function createCanvas(width: number, height: number, svgExportFlag: SvgExportFlag): SvgCanvas
 
+/**
+ * The handle of one font registration.
+ * `typefaceId` identifies that registration, not the typeface.
+ */
 export declare class FontKey {
   // make it a unique type
   private readonly key: symbol
@@ -891,13 +895,7 @@ export interface FontVariationAxis {
 }
 
 /**
- * Override descriptors applied when a font is registered, mirroring the
- * browser FontFace constructor's `style` / `weight` / `stretch` descriptors.
- *
- * Calling `register` twice with identical bytes dedups to a single entry regardless
- * of whether the second call supplied an override; the first registration's
- * override wins. To change an override, `remove` the existing `FontKey`
- * and register again.
+ * Override descriptors applied when a font is registered, mirroring the browser FontFace constructor's `style` / `weight` / `stretch` descriptors.
  */
 export interface FontRegisterOptions {
   /** "normal" | "italic" | "oblique" */
@@ -910,38 +908,47 @@ export interface FontRegisterOptions {
 
 interface IGlobalFonts {
   readonly families: { family: string; styles: { weight: number; width: string; style: string }[] }[]
-  // return FontKey if succeeded, null if failed
+  /**
+   * Register a font from its bytes, under its own family name and under `nameAlias` when given.
+   * Every call gets a key of its own.
+   * Identical bytes under the same options share one typeface and one copy of the data.
+   * @returns the registration's key, or null when the bytes are not a font
+   */
   register(font: Buffer, nameAlias?: string, options?: FontRegisterOptions): FontKey | null
-  // absolute path - returns FontKey if succeeded, null if failed
+  /**
+   * Register a font from an absolute path.
+   * Registrations of one path under the same options share the typeface the first of them loaded, so a file modified on disk is read again only after all of them are removed.
+   * @returns the registration's key, or null when the file cannot be read as a font
+   */
   registerFromPath(path: string, nameAlias?: string, options?: FontRegisterOptions): FontKey | null
   has(name: string): boolean
   loadFontsFromDir(path: string): number
   /**
    * Set an alias for a font family.
+   * The alias names the face that matches the family's default style at the time of the call.
+   * The alias goes away with that face.
    * @param fontName The original font family name
    * @param alias The alias name to set
    * @returns true if the alias was set successfully, false if the font family doesn't exist
    */
   setAlias(fontName: string, alias: string): boolean
+  /**
+   * Remove the registration behind `key`.
+   * The typeface goes with its last registration.
+   * @returns false when the key was removed already
+   */
   remove(key: FontKey): boolean
   /**
-   * Remove multiple fonts by their keys in a single operation.
-   * More efficient than calling remove() multiple times as it triggers only one rebuild.
+   * Remove multiple registrations by their keys in a single operation.
    * @param fontKeys Array of FontKey objects to remove
-   * @returns Number of fonts successfully removed
+   * @returns Number of registrations removed
    */
   removeBatch(fontKeys: FontKey[]): number
   /**
-   * Remove ALL registered fonts.
-   * @returns Number of fonts removed
+   * Remove all registrations.
+   * @returns Number of registrations removed
    */
   removeAll(): number
-  /**
-   * Release the font providers retired by earlier removals.
-   * Only safe when no typeface from a retired provider is still in use.
-   * @returns Number of providers released
-   */
-  clearRetired(): number
   /**
    * Get variation axes for a specific font instance
    * @param familyName The font family name

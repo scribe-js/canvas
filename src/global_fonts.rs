@@ -28,6 +28,8 @@ fn into_napi_error<E>(err: PoisonError<MutexGuard<'_, E>>) -> napi::Error {
   napi::Error::new(napi::Status::GenericFailure, format!("{err}"))
 }
 
+/// The handle of one `register` or `register_from_path` call.
+/// `typeface_id` identifies that registration, not the typeface, which other registrations may share.
 #[napi]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontKey {
@@ -42,8 +44,7 @@ pub mod global_fonts {
   use super::{FONT_DIR, FONT_PATH, FontKey, get_font, into_napi_error};
   use crate::font::{FontStyle, parse_font_stretch};
 
-  /// Override descriptors applied at registration time, mirroring the browser
-  /// FontFace constructor's `style` / `weight` / `stretch` descriptors.
+  /// Override descriptors applied at registration time, mirroring the browser FontFace constructor's `style` / `weight` / `stretch` descriptors.
   #[napi(object)]
   pub struct FontRegisterOptions {
     /// "normal" | "italic" | "oblique"
@@ -100,6 +101,9 @@ pub mod global_fonts {
     Ok((weight, width, slant))
   }
 
+  /// Register a font from its bytes, under the font's own family name and under `name_alias` when given.
+  /// Every call gets a key of its own.
+  /// Identical bytes under the same options share one typeface and one copy of the data.
   #[napi]
   pub fn register(
     font_data: &[u8],
@@ -118,22 +122,9 @@ pub mod global_fonts {
 
   /// Register a font from a file path.
   ///
-  /// Fonts registered via path are deduplicated by the path string itself, not by file contents.
-  /// This means:
-  /// - Registering the same path multiple times returns the existing registration
-  /// - If the font file is modified on disk and `registerFromPath` is called again,
-  ///   the new contents will NOT be loaded - it returns the existing registration
-  ///
-  /// This behavior is intentional to prevent memory waste from duplicate registrations.
-  ///
-  /// ## Hot-reload workaround
-  ///
-  /// To reload a font after modifying the file on disk:
-  /// 1. Call `GlobalFonts.remove(fontKey)` with the key from the original registration
-  /// 2. Call `GlobalFonts.registerFromPath()` again to register the updated font
-  ///
-  /// Note: The `register()` function (buffer-based) deduplicates by content hash,
-  /// so it will detect when font data has changed.
+  /// Every call gets a key of its own.
+  /// Registrations of the same path string under the same options share the typeface the first of them loaded.
+  /// To load a file modified on disk, remove every registration of its path, then register it again.
   // TODO: Do file extensions in font_path need to be converted to lowercase?
   // Windows and macOS are case-insensitive, Linux is not.
   // See: https://github.com/Brooooooklyn/canvas/actions/runs/5893418006/job/15985737723
@@ -179,8 +170,9 @@ pub mod global_fonts {
     Ok(font.set_alias(font_name.as_str(), alias.as_str()))
   }
 
-  /// Remove a previously registered font from the global font collection.
-  /// Returns true if the font was successfully removed, false if it was not found.
+  /// Remove the registration behind `key`.
+  /// The typeface goes with its last registration.
+  /// Returns false when the key was removed already.
   #[napi]
   pub fn remove(key: &FontKey) -> Result<bool> {
     let font = get_font().map_err(into_napi_error)?;
@@ -188,9 +180,6 @@ pub mod global_fonts {
   }
 
   #[napi]
-  /// Remove multiple fonts by their keys in a single operation.
-  /// More efficient than calling remove() multiple times as it triggers only one rebuild.
-  /// Returns the number of fonts successfully removed.
   pub fn remove_batch(font_keys: Vec<&FontKey>) -> Result<u32> {
     let typeface_ids: Vec<u32> = font_keys.iter().map(|k| k.typeface_id).collect();
     let font = get_font().map_err(into_napi_error)?;
@@ -198,20 +187,9 @@ pub mod global_fonts {
   }
 
   #[napi]
-  /// Remove ALL registered fonts in a single operation.
-  /// Returns the number of fonts removed.
   pub fn remove_all() -> Result<u32> {
     let font = get_font().map_err(into_napi_error)?;
     Ok(font.unregister_all() as u32)
-  }
-
-  #[napi]
-  /// Drop the retirement FIFO of `TypefaceFontProvider`s — only safe when
-  /// no typeface from a retired provider is still in use. Returns the
-  /// number of providers released.
-  pub fn clear_retired() -> Result<u32> {
-    let font = get_font().map_err(into_napi_error)?;
-    Ok(font.clear_retired_assets() as u32)
   }
 
   #[napi(object)]

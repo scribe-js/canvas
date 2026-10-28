@@ -132,19 +132,27 @@ fn main() {
         "gnu" => match compile_target_arch.as_str() {
           "aarch64" => {
             link_libcxx(&mut build);
-            build
-              .include(
-                "/usr/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot/usr/include",
-              )
-              .flag("--sysroot=/usr/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot");
-            println!("cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/lib/llvm-19/lib");
-            println!("cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/lib");
-            println!(
-              "cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot/lib"
-            );
-            println!(
-              "cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/lib/gcc/aarch64-unknown-linux-gnu/4.8.5"
-            );
+            if env::var("HOST")
+              .map(|host| host == compile_target)
+              .unwrap_or(false)
+            {
+              build.include("/usr/lib/llvm-19/include/c++/v1");
+              println!("cargo:rustc-link-search=/usr/lib/llvm-19/lib");
+            } else {
+              build
+                .include(
+                  "/usr/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot/usr/include",
+                )
+                .flag("--sysroot=/usr/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot");
+              println!("cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/lib/llvm-19/lib");
+              println!("cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/lib");
+              println!(
+                "cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot/lib"
+              );
+              println!(
+                "cargo:rustc-link-search=/usr/aarch64-unknown-linux-gnu/lib/gcc/aarch64-unknown-linux-gnu/4.8.5"
+              );
+            }
           }
           "x86_64" => {
             link_libcxx(&mut build);

@@ -2131,65 +2131,16 @@ uint32_t skiac_font_collection_register(
     const uint8_t* font,
     size_t length,
     const char* name_alias) {
-  auto typeface_data = SkData::MakeWithCopy(font, length);
-  auto typeface = c_font_collection->font_mgr->makeFromData(typeface_data);
-  if (!typeface) {
-    return 0;
-  }
-  uint32_t typeface_id;
-  if (name_alias) {
-    auto alias = SkString(name_alias);
-    typeface_id = c_font_collection->assets->registerTypefaceWithTracking(
-        typeface_data, typeface, alias);
-  } else {
-    typeface_id = c_font_collection->assets->registerTypefaceWithTracking(
-        typeface_data, typeface);
-  }
-  return typeface_id;
+  return c_font_collection->registerFont(font, length, nullptr, name_alias, -1,
+                                         -1, -1);
 }
 
 uint32_t skiac_font_collection_register_from_path(
     skiac_font_collection* c_font_collection,
     const char* font_path,
     const char* name_alias) {
-  // Use lazy loading - don't load entire file into memory
-  // System fonts are always on disk, so we just need to track the path for
-  // rebuild
-  auto typeface = c_font_collection->font_mgr->makeFromFile(font_path);
-  if (!typeface) {
-    return 0;
-  }
-
-  std::string path_str(font_path);
-  uint32_t typeface_id;
-  if (name_alias) {
-    auto alias = SkString(name_alias);
-    typeface_id =
-        c_font_collection->assets->registerTypefaceFromPathWithTracking(
-            path_str, typeface, alias);
-  } else {
-    typeface_id =
-        c_font_collection->assets->registerTypefaceFromPathWithTracking(
-            path_str, typeface);
-  }
-  return typeface_id;
-}
-
-// Build an SkFontStyle with any caller-supplied fields overriding the
-// typeface's own values. Sentinel `-1` on a field means "keep the file's
-// value." Weights outside [1, 1000], widths outside [1, 9], and slants
-// outside [0, 2] are treated as sentinels.
-static SkFontStyle buildOverrideStyle(const sk_sp<SkTypeface>& typeface,
-                                      int weight,
-                                      int width,
-                                      int slant) {
-  SkFontStyle base = typeface->fontStyle();
-  int final_weight = (weight >= 1 && weight <= 1000) ? weight : base.weight();
-  int final_width = (width >= 1 && width <= 9) ? width : base.width();
-  SkFontStyle::Slant final_slant = (slant >= 0 && slant <= 2)
-                                       ? static_cast<SkFontStyle::Slant>(slant)
-                                       : base.slant();
-  return SkFontStyle(final_weight, final_width, final_slant);
+  return c_font_collection->registerFont(nullptr, 0, font_path, name_alias, -1,
+                                         -1, -1);
 }
 
 uint32_t skiac_font_collection_register_with_style(
@@ -2200,22 +2151,8 @@ uint32_t skiac_font_collection_register_with_style(
     int weight,
     int width,
     int slant) {
-  auto typeface_data = SkData::MakeWithCopy(font, length);
-  auto typeface = c_font_collection->font_mgr->makeFromData(typeface_data);
-  if (!typeface) {
-    return 0;
-  }
-  SkFontStyle override = buildOverrideStyle(typeface, weight, width, slant);
-  uint32_t typeface_id;
-  if (name_alias) {
-    auto alias = SkString(name_alias);
-    typeface_id = c_font_collection->assets->registerTypefaceWithTracking(
-        typeface_data, typeface, alias, &override);
-  } else {
-    typeface_id = c_font_collection->assets->registerTypefaceWithTracking(
-        typeface_data, typeface, &override);
-  }
-  return typeface_id;
+  return c_font_collection->registerFont(font, length, nullptr, name_alias,
+                                         weight, width, slant);
 }
 
 uint32_t skiac_font_collection_register_from_path_with_style(
@@ -2225,52 +2162,18 @@ uint32_t skiac_font_collection_register_from_path_with_style(
     int weight,
     int width,
     int slant) {
-  auto typeface = c_font_collection->font_mgr->makeFromFile(font_path);
-  if (!typeface) {
-    return 0;
-  }
-
-  std::string path_str(font_path);
-  SkFontStyle override = buildOverrideStyle(typeface, weight, width, slant);
-  uint32_t typeface_id;
-  if (name_alias) {
-    auto alias = SkString(name_alias);
-    typeface_id =
-        c_font_collection->assets->registerTypefaceFromPathWithTracking(
-            path_str, typeface, alias, &override);
-  } else {
-    typeface_id =
-        c_font_collection->assets->registerTypefaceFromPathWithTracking(
-            path_str, typeface, &override);
-  }
-  return typeface_id;
+  return c_font_collection->registerFont(nullptr, 0, font_path, name_alias,
+                                         weight, width, slant);
 }
 
 size_t skiac_font_collection_unregister(
     skiac_font_collection* c_font_collection,
     uint32_t typeface_id) {
-  // Get aliases before removal so we can clean up set_aliases
-  std::vector<std::string> removed_aliases;
-  bool removed =
-      c_font_collection->assets->removeTypeface(typeface_id, &removed_aliases);
-  if (removed) {
-    // Clean up set_aliases entries for this font's family names
-    // This prevents stale aliases from transferring to newly registered fonts
-    for (const auto& alias : removed_aliases) {
-      auto it = c_font_collection->set_aliases.begin();
-      while (it != c_font_collection->set_aliases.end()) {
-        if (it->first == alias) {
-          it = c_font_collection->set_aliases.erase(it);
-        } else {
-          ++it;
-        }
-      }
-    }
-    // Rebuild provider with remaining fonts (old provider is kept alive)
-    c_font_collection->rebuildAssets();
-    return 1;
+  if (!c_font_collection->unregisterFont(typeface_id)) {
+    return 0;
   }
-  return 0;
+  c_font_collection->collection->clearCaches();
+  return 1;
 }
 
 size_t skiac_font_collection_unregister_batch(
@@ -2278,54 +2181,28 @@ size_t skiac_font_collection_unregister_batch(
     const uint32_t* typeface_ids,
     size_t count) {
   size_t removed_count = 0;
-  std::vector<std::string> all_removed_aliases;
   for (size_t i = 0; i < count; i++) {
-    std::vector<std::string> removed_aliases;
-    if (c_font_collection->assets->removeTypeface(typeface_ids[i],
-                                                  &removed_aliases)) {
+    if (c_font_collection->unregisterFont(typeface_ids[i])) {
       removed_count++;
-      // Collect all removed aliases for cleanup
-      all_removed_aliases.insert(all_removed_aliases.end(),
-                                 removed_aliases.begin(),
-                                 removed_aliases.end());
     }
   }
   if (removed_count > 0) {
-    // Clean up set_aliases entries for all removed fonts' family names
-    for (const auto& alias : all_removed_aliases) {
-      auto it = c_font_collection->set_aliases.begin();
-      while (it != c_font_collection->set_aliases.end()) {
-        if (it->first == alias) {
-          it = c_font_collection->set_aliases.erase(it);
-        } else {
-          ++it;
-        }
-      }
-    }
-    // Single rebuild for all removals
-    c_font_collection->rebuildAssets();
+    c_font_collection->collection->clearCaches();
   }
   return removed_count;
 }
 
 size_t skiac_font_collection_unregister_all(
     skiac_font_collection* c_font_collection) {
-  size_t removed_count = c_font_collection->assets->removeAllTypefaces();
+  size_t removed_count = c_font_collection->registrations.size();
+  c_font_collection->registrations.clear();
+  c_font_collection->contents.clear();
+  c_font_collection->contents_by_hash.clear();
+  c_font_collection->assets->clear();
   if (removed_count > 0) {
-    // Clear all set_aliases since all fonts are removed
-    c_font_collection->set_aliases.clear();
-    c_font_collection->rebuildAssets();
+    c_font_collection->collection->clearCaches();
   }
   return removed_count;
-}
-
-// Drop the retirement FIFO — caller promises no typeface from a retired
-// provider is still in use (see rebuildAssets for the safety rule).
-size_t skiac_font_collection_clear_retired_assets(
-    skiac_font_collection* c_font_collection) {
-  size_t count = c_font_collection->retired_assets.size();
-  c_font_collection->retired_assets.clear();
-  return count;
 }
 
 bool skiac_font_collection_set_alias(skiac_font_collection* c_font_collection,
@@ -2333,32 +2210,15 @@ bool skiac_font_collection_set_alias(skiac_font_collection* c_font_collection,
                                      const char* alias) {
   auto style = SkFontStyle();
   auto typeface = c_font_collection->assets->matchFamilyStyle(family, style);
-
-  // Only proceed if the family exists
   if (!typeface) {
-    return false;  // Family doesn't exist, don't store invalid mapping
+    return false;
   }
-
-  // Check if this alias already points to the SAME typeface (true idempotency)
-  // We compare by uniqueID rather than just checking if the alias exists,
-  // because the alias might exist as a system font that we want to shadow.
   auto existing_typeface =
       c_font_collection->assets->matchFamilyStyle(alias, style);
   if (existing_typeface &&
       existing_typeface->uniqueID() == typeface->uniqueID()) {
-    // Alias already points to the same typeface - true idempotency, no need to
-    // re-register
-    c_font_collection->set_aliases.insert(
-        {std::string(family), std::string(alias)});
     return true;
   }
-
-  // Track the alias for rebuild (only valid mappings, std::set
-  // auto-deduplicates)
-  c_font_collection->set_aliases.insert(
-      {std::string(family), std::string(alias)});
-
-  // Register the alias - this will shadow any existing font with the same name
   c_font_collection->assets->registerTypeface(std::move(typeface),
                                               SkString(alias));
   return true;
