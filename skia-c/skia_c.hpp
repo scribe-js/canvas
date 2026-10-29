@@ -56,8 +56,8 @@
 #include <src/xml/SkXMLWriter.h>
 #include <algorithm>
 #include <cstring>
-#include <map>
 #include <iterator>
+#include <map>
 #include <mutex>
 #include <set>
 #include <shared_mutex>
@@ -360,8 +360,7 @@ class ScribeFontProvider : public SkFontMgr {
   }
 
  private:
-  using Families =
-      std::unordered_map<std::string, sk_sp<ScribeFontStyleSet>>;
+  using Families = std::unordered_map<std::string, sk_sp<ScribeFontStyleSet>>;
 
   sk_sp<ScribeFontStyleSet> findFamily(const char* family_name) const {
     if (!family_name) {
