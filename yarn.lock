@@ -1919,6 +1919,7 @@ __metadata:
     "@types/lodash": "npm:^4.17.21"
     "@types/node": "npm:^25.0.3"
     "@types/semver": "npm:^7"
+    "@wasm-fmt/clang-format": "npm:23.1.1"
     ava: "npm:^7.0.0"
     canvas: "npm:^3.2.0"
     canvaskit-wasm: "npm:^0.41.0"
@@ -2147,6 +2148,17 @@ __metadata:
   bin:
     nft: out/cli.js
   checksum: 10c0/e44f2bb41908f11ece98aa5c4f33b7ff6575a5102ab2db2675f4ee74bcc62439dce4d363a393f80a677898f63f7cac5741685653ee97a924e61e75c9d5b504d6
+  languageName: node
+  linkType: hard
+
+"@wasm-fmt/clang-format@npm:23.1.1":
+  version: 23.1.1
+  resolution: "@wasm-fmt/clang-format@npm:23.1.1"
+  bin:
+    clang-format: clang-format-cli.cjs
+    clang-format-diff: clang-format-diff.py
+    git-clang-format: git-clang-format
+  checksum: 10c0/56a8ab4e58f2d781e2af44ed9da240151d474df7c1421fa689f24140b00540b2af77e74ba0c5ef8cdcb54b2e9bb26f9f6a195ea3dec83eceb01065a7d326e403
   languageName: node
   linkType: hard
 

@@ -587,11 +587,12 @@ test.serial("two faces under one name: removing one leaves the other's match", (
   t.false(GlobalFonts.has(alias))
 })
 
-test.serial('ten thousand register, draw and remove cycles keep memory bounded', (t) => {
+test.serial('ten thousand register, draw and remove cycles release their memory', async (t) => {
   // The canvas is disposed each cycle, since a canvas's deferred recording holds every typeface drawn on it until then.
+  // The finalizers of disposed canvases run only between tasks, so the loop yields now and then.
   const serifData = readFileSync(join(__dirname, 'fonts', 'SourceSerifPro-Regular.ttf'))
   let removed = 0
-  let afterWarmUp = 0
+  const samples: number[] = []
   for (let i = 0; i < 10000; i++) {
     const key = GlobalFonts.register(serifData, `MemoryCycle-${i}`)
     const canvas = createCanvas(200, 60)
@@ -600,13 +601,17 @@ test.serial('ten thousand register, draw and remove cycles keep memory bounded',
     ctx.fillText('cycle', 4, 40)
     canvas.dispose()
     if (GlobalFonts.remove(key!)) removed++
-    if (i === 1999) afterWarmUp = process.memoryUsage().rss
+    if ((i + 1) % 500 === 0) {
+      await new Promise((resolve) => setImmediate(resolve))
+      samples.push(process.memoryUsage().rss)
+    }
   }
   t.is(removed, 10000, 'every cycle removed its registration')
   t.false(GlobalFonts.has('MemoryCycle-9999'))
-  const growth = process.memoryUsage().rss - afterWarmUp
+  const growth = samples[samples.length - 1] - samples[3]
+  const curve = samples.map((rss) => (rss / 1048576).toFixed(0)).join(' ')
   t.true(
     growth < MEMORY_BOUND,
-    `memory grew ${(growth / 1048576).toFixed(0)} MB over the eight thousand cycles after warm-up`,
+    `memory grew ${(growth / 1048576).toFixed(0)} MB over the eight thousand cycles after warm-up, sampled every five hundred cycles: ${curve} MB`,
   )
 })

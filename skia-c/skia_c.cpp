@@ -109,6 +109,7 @@ static skiac_transform conv_to_transform(const SkMatrix& matrix) {
 
 void skiac_clear_all_cache() {
   SkGraphics::PurgeAllCaches();
+  SkShaper::PurgeCaches();
 }
 
 // Surface
@@ -2166,13 +2167,22 @@ uint32_t skiac_font_collection_register_from_path_with_style(
                                          weight, width, slant);
 }
 
+// A glyph strike and a shaper face each hold their typeface, and neither
+// cache counts the typeface's bytes toward its limit. A removed typeface
+// would otherwise stay resident until its entry happened to be evicted.
+static void purgeFontCaches(skiac_font_collection* c_font_collection) {
+  c_font_collection->collection->clearCaches();
+  SkGraphics::PurgeFontCache();
+  SkShaper::PurgeCaches();
+}
+
 size_t skiac_font_collection_unregister(
     skiac_font_collection* c_font_collection,
     uint32_t typeface_id) {
   if (!c_font_collection->unregisterFont(typeface_id)) {
     return 0;
   }
-  c_font_collection->collection->clearCaches();
+  purgeFontCaches(c_font_collection);
   return 1;
 }
 
@@ -2187,7 +2197,7 @@ size_t skiac_font_collection_unregister_batch(
     }
   }
   if (removed_count > 0) {
-    c_font_collection->collection->clearCaches();
+    purgeFontCaches(c_font_collection);
   }
   return removed_count;
 }
@@ -2200,7 +2210,7 @@ size_t skiac_font_collection_unregister_all(
   c_font_collection->contents_by_hash.clear();
   c_font_collection->assets->clear();
   if (removed_count > 0) {
-    c_font_collection->collection->clearCaches();
+    purgeFontCaches(c_font_collection);
   }
   return removed_count;
 }

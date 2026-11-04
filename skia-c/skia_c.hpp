@@ -46,6 +46,7 @@
 #include <modules/skparagraph/src/ParagraphBuilderImpl.h>
 #include <modules/skparagraph/src/ParagraphImpl.h>
 #include <modules/skresources/include/SkResources.h>
+#include <modules/skshaper/include/SkShaper.h>
 #include <modules/skunicode/include/SkUnicode_icu.h>
 #include <modules/svg/include/SkSVGDOM.h>
 #include <modules/svg/include/SkSVGNode.h>
@@ -521,8 +522,8 @@ struct skiac_font_collection {
     return last_registration_id;
   }
 
-  // The caller must then purge the collection's caches, which may still resolve
-  // the removed names.
+  // The caller must then purge the caches that still resolve the removed names
+  // or hold the typeface: the collection's, the glyph strikes and the shaper's.
   bool unregisterFont(uint32_t registration_id) {
     auto it = registrations.find(registration_id);
     if (it == registrations.end()) {
